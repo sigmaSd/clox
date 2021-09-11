@@ -1,37 +1,56 @@
 mod chunk;
-use chunk::Chunk;
-use debug::disassemble_chunk;
-use value::Value;
-use vm::Vm;
+use std::io::Write;
+use std::path::Path;
+use std::process;
+
+use vm::InterpretError;
 mod debug;
 pub mod memory;
 mod value;
 mod vm;
-
-use crate::chunk::OpCode;
+use vm::VM;
+mod compile;
+mod scanner;
 
 fn main() {
-    let mut vm = Vm::new();
-    let mut c = Chunk::new();
+    unsafe {
+        VM.init();
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        match args.len() {
+            0 => repl(),
+            1 => run_file(&args[0]),
+            _ => {
+                eprintln!("Usage: clox [path]");
+                process::exit(64);
+            }
+        }
+        VM.free();
+    }
+}
 
-    let constant = c.add_constant(1.2);
-    c.write(OpCode::Constant as u8, 123);
-    c.write(constant, 123);
+unsafe fn run_file<P: AsRef<Path>>(path: P) {
+    let path = path.as_ref();
+    let source = std::fs::read_to_string(path).unwrap();
+    let result = VM.interpret(&source);
+    match result {
+        Ok(()) => (),
+        Err(InterpretError::CompileError) => process::exit(65),
+        Err(InterpretError::RuntimError) => process::exit(70),
+    }
+}
 
-    let constant = c.add_constant(3.4);
-    c.write(OpCode::Constant.into(), 123);
-    c.write(constant, 123);
-
-    c.write(OpCode::Add.into(), 123);
-
-    let constant = c.add_constant(5.6);
-    c.write(OpCode::Constant.into(), 123);
-    c.write(constant, 123);
-
-    c.write(OpCode::Divide.into(), 123);
-    c.write(OpCode::Negate.into(), 123);
-
-    c.write(OpCode::Return as u8, 123);
-    //disassemble_chunk(&c, "test chunk");
-    vm.interpret(&c).unwrap();
+unsafe fn repl() {
+    let mut line = String::new();
+    loop {
+        print!("> ");
+        std::io::stdout().flush().unwrap();
+        std::io::stdin().read_line(&mut line).unwrap();
+        let input = line.trim();
+        if input.is_empty() {
+            println!();
+            break;
+        }
+        VM.interpret(input).unwrap();
+        line.clear();
+    }
 }

@@ -2,7 +2,8 @@ use crate::{
     memory::{free_array, grow_array, grow_capacity},
     value::Value,
 };
-use std::ptr;
+use std::convert::TryInto;
+use std::{convert::TryFrom, ptr};
 
 use crate::value::ValueArray;
 

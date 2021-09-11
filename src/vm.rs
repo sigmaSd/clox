@@ -1,7 +1,9 @@
+use std::convert::TryInto;
 use std::ptr;
 
 use crate::{
     chunk::{Chunk, OpCode},
+    compile,
     value::{print_value, Value},
 };
 
@@ -13,30 +15,28 @@ pub struct Vm {
     stack: [Value; STACK_MAX],
     stack_top: *mut Value,
 }
+pub static mut VM: Vm = Vm::new();
 
 impl Vm {
-    pub fn new() -> Self {
-        let mut this = Self {
+    const fn new() -> Self {
+        Self {
             chunk: ptr::null(),
             ip: ptr::null_mut(),
-            stack: unsafe { std::mem::zeroed() },
+            stack: [0.0; STACK_MAX],
             stack_top: ptr::null_mut(),
-        };
-        this.init();
-        this
+        }
     }
-    fn init(&mut self) {
+    pub fn init(&mut self) {
         self.reset_stack();
     }
     pub fn reset_stack(&mut self) {
         self.stack_top = &mut self.stack as *mut _;
     }
 
-    pub fn interpret(&mut self, chunk: &Chunk) -> Result<(), InterpretError> {
+    pub fn interpret(&mut self, source: &str) -> Result<(), InterpretError> {
         unsafe {
-            self.chunk = chunk;
-            self.ip = (*self.chunk).code;
-            self.run()
+            compile::compile(source);
+            Ok(())
         }
     }
     unsafe fn run(&mut self) -> Result<(), InterpretError> {
@@ -114,6 +114,7 @@ impl Vm {
             self.stack_top = self.stack_top.add(1);
         }
     }
+    pub fn free(&mut self) {}
 }
 
 #[derive(Debug)]

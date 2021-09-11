@@ -2,6 +2,7 @@ use crate::{
     chunk::{Chunk, OpCode},
     value::print_value,
 };
+use std::convert::TryInto;
 
 pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
     println!("== {} ==", name);
