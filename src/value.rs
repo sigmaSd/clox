@@ -2,11 +2,10 @@ use std::ptr;
 
 use crate::memory::{free_array, grow_array, grow_capacity};
 
-pub struct Value(pub f64);
-impl Value {
-    pub fn print(&self) {
-        print!("{}", self.0)
-    }
+pub type Value = f64;
+
+pub fn print_value(val: &Value) {
+    print!("{}", val)
 }
 
 #[derive(Debug)]

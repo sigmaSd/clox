@@ -1,4 +1,7 @@
-use crate::chunk::{Chunk, OpCode};
+use crate::{
+    chunk::{Chunk, OpCode},
+    value::print_value,
+};
 
 pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
     println!("== {} ==", name);
@@ -24,8 +27,13 @@ unsafe fn disassemble_instruction(chunk: &Chunk, offset: isize) -> isize {
 
     match (*chunk.code.offset(offset)).try_into() {
         Ok(instruction) => match instruction {
-            OpCode::OpReturn => simple_instruction("OpReturn", offset),
-            OpCode::OpConstant => constant_instuction("OpConstant", chunk, offset),
+            OpCode::Return => simple_instruction("OpReturn", offset),
+            OpCode::Constant => constant_instuction("OpConstant", chunk, offset),
+            OpCode::Negate => simple_instruction("OpNegate", offset),
+            OpCode::Add => simple_instruction("OpAdd", offset),
+            OpCode::Substract => simple_instruction("OpSubstract", offset),
+            OpCode::Multiply => simple_instruction("OpMultiply", offset),
+            OpCode::Divide => simple_instruction("OpDivide", offset),
         },
         Err(e) => {
             println!("{}", e);
@@ -38,7 +46,8 @@ fn constant_instuction(name: &str, chunk: &Chunk, offset: isize) -> isize {
     let constant: usize = unsafe { *chunk.code.offset(offset + 1) }.into();
     print!("{} {:} '", name, constant);
     unsafe {
-        (*chunk.constants.values.add(constant)).print();
+        let value = *chunk.constants.values.add(constant);
+        print_value(&value);
     }
     println!("'");
     offset + 2

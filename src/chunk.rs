@@ -8,18 +8,33 @@ use crate::value::ValueArray;
 
 #[derive(Debug)]
 pub enum OpCode {
-    OpReturn = 0,
-    OpConstant,
+    Return = 0,
+    Constant,
+    Add,
+    Substract,
+    Multiply,
+    Divide,
+    Negate,
 }
 impl TryFrom<u8> for OpCode {
     type Error = String;
 
     fn try_from(instruction: u8) -> Result<Self, Self::Error> {
         match instruction {
-            0 => Ok(OpCode::OpReturn),
-            1 => Ok(OpCode::OpConstant),
+            0 => Ok(OpCode::Return),
+            1 => Ok(OpCode::Constant),
+            2 => Ok(OpCode::Add),
+            3 => Ok(OpCode::Substract),
+            4 => Ok(OpCode::Multiply),
+            5 => Ok(OpCode::Divide),
+            6 => Ok(OpCode::Negate),
             instruction => Err(format!("Unknown opcode {}", instruction)),
         }
+    }
+}
+impl From<OpCode> for u8 {
+    fn from(code: OpCode) -> Self {
+        code as _
     }
 }
 
