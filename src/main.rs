@@ -50,7 +50,7 @@ unsafe fn repl() {
             println!();
             break;
         }
-        VM.interpret(input).unwrap();
+        let _ = VM.interpret(input);
         line.clear();
     }
 }

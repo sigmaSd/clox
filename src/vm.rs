@@ -35,8 +35,15 @@ impl Vm {
 
     pub fn interpret(&mut self, source: &str) -> Result<(), InterpretError> {
         unsafe {
-            compile::compile(source);
-            Ok(())
+            let mut chunk = Chunk::new();
+            if compile::compile(source, &mut chunk).is_err() {
+                return Err(InterpretError::CompileError);
+            }
+
+            self.chunk = &chunk;
+            self.ip = (*self.chunk).code;
+
+            self.run()
         }
     }
     unsafe fn run(&mut self) -> Result<(), InterpretError> {

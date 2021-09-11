@@ -29,12 +29,22 @@ pub unsafe fn init_scanner(source: &str) {
     scanner.line = 1;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Token {
     pub ttype: TokenType,
     pub start: *const u8,
     pub length: usize,
     pub line: usize,
+}
+impl Token {
+    pub const fn new_uninit() -> Self {
+        Self {
+            ttype: TokenType::ERROR,
+            start: ptr::null(),
+            length: 0,
+            line: 0,
+        }
+    }
 }
 pub unsafe fn scan_token() -> Token {
     use TokenType::*;
@@ -229,7 +239,7 @@ unsafe fn is_at_end() -> bool {
 
 #[allow(non_camel_case_types)]
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub enum TokenType {
     // Single-character tokens.
     LEFT_PAREN,
