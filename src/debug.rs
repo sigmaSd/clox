@@ -35,6 +35,13 @@ unsafe fn disassemble_instruction(chunk: &Chunk, offset: isize) -> isize {
             OpCode::Substract => simple_instruction("OpSubstract", offset),
             OpCode::Multiply => simple_instruction("OpMultiply", offset),
             OpCode::Divide => simple_instruction("OpDivide", offset),
+            OpCode::Nil => simple_instruction("OpNil", offset),
+            OpCode::True => simple_instruction("OpTrue", offset),
+            OpCode::False => simple_instruction("OpFalse", offset),
+            OpCode::Not => simple_instruction("OpNot", offset),
+            OpCode::Equal => simple_instruction("OpEqual", offset),
+            OpCode::Greater => simple_instruction("OpGreater", offset),
+            OpCode::Less => simple_instruction("OpLess", offset),
         },
         Err(e) => {
             println!("{}", e);

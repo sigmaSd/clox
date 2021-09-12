@@ -5,10 +5,22 @@ use crate::{
     chunk::{Chunk, OpCode},
     compile,
     value::{print_value, Value},
+    AS_BOOL, AS_NUMBER, BOOL_VAL, NIL_VAL, NUMBER_VAL,
 };
 
 const STACK_MAX: usize = 256;
 
+macro_rules! runtime_error {
+       ($($arg:tt)*) => ({
+           eprintln!("{}", format_args!($($arg)*));
+           let instruction = VM.ip.offset_from((*VM.chunk).code) - 1;
+           let line = *(*VM.chunk).lines.offset(instruction);
+           eprintln!("[line {}] in script", line);
+           VM.reset_stack();
+           })
+}
+
+#[derive(Debug)]
 pub struct Vm {
     chunk: *const Chunk,
     ip: *mut u8,
@@ -22,7 +34,7 @@ impl Vm {
         Self {
             chunk: ptr::null(),
             ip: ptr::null_mut(),
-            stack: [0.0; STACK_MAX],
+            stack: [Value::Nil; STACK_MAX],
             stack_top: ptr::null_mut(),
         }
     }
@@ -60,11 +72,15 @@ impl Vm {
             };
         }
         macro_rules! BINARY_OP {
-                ($op: tt) => {
+                ($vtype:path, $op: tt) => {
                     {
-                    let b = self.pop();
-                    let a = self.pop();
-                    self.push(a $op b);
+                    if !self.peek(0).is_number() || !self.peek(1).is_number() {
+                        runtime_error!("Operands must be numbers.");
+                        return Err(InterpretError::RuntimError);
+                    }
+                    let b = AS_NUMBER!(self.pop());
+                    let a = AS_NUMBER!(self.pop());
+                    self.push($vtype(a $op b));
                     }
                 }
             }
@@ -98,13 +114,31 @@ impl Vm {
                     self.push(constant);
                 }
                 OpCode::Negate => {
-                    let value = self.pop();
-                    self.push(-value);
+                    if !self.peek(0).is_number() {
+                        runtime_error!("Operand must be a number.");
+                        return Err(InterpretError::RuntimError);
+                    }
+                    let value = AS_NUMBER!(self.pop());
+                    self.push(NUMBER_VAL!(-value));
                 }
-                OpCode::Add => BINARY_OP!(+),
-                OpCode::Substract => BINARY_OP!(-),
-                OpCode::Multiply => BINARY_OP!(*),
-                OpCode::Divide => BINARY_OP!(/),
+                OpCode::Add => BINARY_OP!(Value::Number, +),
+                OpCode::Substract => BINARY_OP!(Value::Number, -),
+                OpCode::Multiply => BINARY_OP!(Value::Number, *),
+                OpCode::Divide => BINARY_OP!(Value::Number, /),
+                OpCode::Nil => self.push(NIL_VAL!()),
+                OpCode::True => self.push(BOOL_VAL!(true)),
+                OpCode::False => self.push(BOOL_VAL!(false)),
+                OpCode::Not => {
+                    let val = is_falsey(self.pop());
+                    self.push(BOOL_VAL!(val));
+                }
+                OpCode::Equal => {
+                    let b = self.pop();
+                    let a = self.pop();
+                    self.push(BOOL_VAL!(a == b));
+                }
+                OpCode::Greater => BINARY_OP!(Value::Bool, >),
+                OpCode::Less => BINARY_OP!(Value::Bool, <),
             }
         }
     }
@@ -114,6 +148,9 @@ impl Vm {
             *self.stack_top
         }
     }
+    unsafe fn peek(&self, distance: isize) -> Value {
+        *self.stack_top.offset(-1 - distance)
+    }
 
     fn push(&mut self, value: Value) {
         unsafe {
@@ -122,6 +159,10 @@ impl Vm {
         }
     }
     pub fn free(&mut self) {}
+}
+
+fn is_falsey(val: Value) -> bool {
+    val.is_nil() || val.is_bool() && !AS_BOOL!(val)
 }
 
 #[derive(Debug)]

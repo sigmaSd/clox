@@ -2,10 +2,80 @@ use std::ptr;
 
 use crate::memory::{free_array, grow_array, grow_capacity};
 
-pub type Value = f64;
+#[derive(Debug, Clone, Copy)]
+pub enum Value {
+    Bool(bool),
+    Number(f64),
+    Nil,
+}
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Bool(l0), Self::Bool(r0)) => l0 == r0,
+            (Self::Number(l0), Self::Number(r0)) => l0 == r0,
+            _ => std::mem::discriminant(self) == std::mem::discriminant(other),
+        }
+    }
+}
+impl Value {
+    pub fn is_bool(&self) -> bool {
+        matches!(self, Value::Bool(_))
+    }
+    pub fn is_nil(&self) -> bool {
+        matches!(self, Value::Nil)
+    }
+    pub fn is_number(&self) -> bool {
+        matches!(self, Value::Number(_))
+    }
+}
+
+#[macro_export]
+macro_rules! AS_VAL_TYPE {
+    ($val: expr, $vtype: path) => {{
+        if let $vtype(v) = $val {
+            v
+        } else {
+            unreachable!()
+        }
+    }};
+}
+#[macro_export]
+macro_rules! AS_BOOL {
+    ($val: expr) => {
+        crate::AS_VAL_TYPE!($val, crate::value::Value::Bool)
+    };
+}
+#[macro_export]
+macro_rules! AS_NUMBER {
+    ($val: expr) => {
+        crate::AS_VAL_TYPE!($val, crate::value::Value::Number)
+    };
+}
+#[macro_export]
+macro_rules! BOOL_VAL {
+    ($val: expr) => {{
+        crate::value::Value::Bool($val)
+    }};
+}
+#[macro_export]
+macro_rules! NUMBER_VAL {
+    ($val: expr) => {{
+        crate::value::Value::Number($val)
+    }};
+}
+#[macro_export]
+macro_rules! NIL_VAL {
+    () => {{
+        crate::value::Value::Nil
+    }};
+}
 
 pub fn print_value(val: &Value) {
-    print!("{}", val)
+    match val {
+        Value::Bool(b) => print!("{}", b),
+        Value::Number(n) => print!("{}", n),
+        Value::Nil => print!("nil"),
+    }
 }
 
 #[derive(Debug)]

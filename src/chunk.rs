@@ -7,32 +7,35 @@ use std::{convert::TryFrom, ptr};
 
 use crate::value::ValueArray;
 
-#[derive(Debug)]
-pub enum OpCode {
-    Return = 0,
-    Constant,
-    Add,
-    Substract,
-    Multiply,
-    Divide,
-    Negate,
-}
-impl TryFrom<u8> for OpCode {
-    type Error = String;
+macro_rules! gen_opcode {
+($($name: ident)+) => (
+    #[derive(Debug)]
+    pub enum OpCode {
+        $(
+            $name,
+         )+
+    }
+    impl TryFrom<u8> for OpCode {
+        type Error = String;
 
-    fn try_from(instruction: u8) -> Result<Self, Self::Error> {
-        match instruction {
-            0 => Ok(OpCode::Return),
-            1 => Ok(OpCode::Constant),
-            2 => Ok(OpCode::Add),
-            3 => Ok(OpCode::Substract),
-            4 => Ok(OpCode::Multiply),
-            5 => Ok(OpCode::Divide),
-            6 => Ok(OpCode::Negate),
-            instruction => Err(format!("Unknown opcode {}", instruction)),
+        fn try_from(instruction: u8) -> Result<Self, Self::Error> {
+            $(
+            #[allow(non_upper_case_globals)]
+            const $name:u8 = OpCode::$name as u8;
+            )+
+            #[allow(non_upper_case_globals)]
+            match instruction {
+                $(
+                    $name => Ok(OpCode::$name),
+                )+
+                instruction => Err(format!("Unknown opcode {}", instruction)),
+            }
         }
     }
-}
+)}
+
+gen_opcode!(Return Constant Nil True False Equal Greater Less Add Substract Multiply Divide Not Negate);
+
 impl From<OpCode> for u8 {
     fn from(code: OpCode) -> Self {
         code as _

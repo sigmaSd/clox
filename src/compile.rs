@@ -4,6 +4,7 @@ use crate::{
     chunk::{Chunk, OpCode},
     debug::disassemble_chunk,
     scanner::{self, Token, TokenType},
+    NUMBER_VAL,
 };
 
 pub unsafe fn compile(source: &str, chunk: &mut Chunk) -> Result<(), ()> {
@@ -40,10 +41,24 @@ unsafe fn binary() {
 
     use TokenType::*;
     match operator_type {
+        BANG_EQUAL => emit_bytes(OpCode::Equal.into(), OpCode::Not.into()),
+        EQUAL_EQUAL => emit_byte(OpCode::Equal.into()),
+        GREATER => emit_byte(OpCode::Greater.into()),
+        GREATER_EQUAL => emit_bytes(OpCode::Less.into(), OpCode::Not.into()),
+        LESS => emit_byte(OpCode::Less.into()),
+        LESS_EQUAL => emit_bytes(OpCode::Greater.into(), OpCode::Not.into()),
         PLUS => emit_byte(OpCode::Add.into()),
         MINUS => emit_byte(OpCode::Substract.into()),
         STAR => emit_byte(OpCode::Multiply.into()),
         SLASH => emit_byte(OpCode::Divide.into()),
+        _ => unreachable!(),
+    }
+}
+unsafe fn literal() {
+    match parser.previous.ttype {
+        TokenType::FALSE => emit_byte(OpCode::False.into()),
+        TokenType::NIL => emit_byte(OpCode::Nil.into()),
+        TokenType::TRUE => emit_byte(OpCode::True.into()),
         _ => unreachable!(),
     }
 }
@@ -58,6 +73,7 @@ unsafe fn unary() {
 
     use TokenType::*;
     match operator_type {
+        BANG => emit_byte(OpCode::Not.into()),
         MINUS => emit_byte(OpCode::Negate.into()),
         _ => (),
     }
@@ -151,7 +167,7 @@ unsafe fn emit_constant(value: f64) {
 }
 
 unsafe fn make_constant(value: f64) -> u8 {
-    (*current_chunk()).add_constant(value)
+    (*current_chunk()).add_constant(NUMBER_VAL!(value))
     // FIXME
     // if constant > u8::MAX {
     //     error("Too many constants in one chunk.");
@@ -339,7 +355,7 @@ const RULES: Map<40> = Map([
     (
         BANG,
         ParseRule {
-            prefix: None,
+            prefix: Some(unary),
             infix: None,
             presendence: Presendence::NONE,
         },
@@ -348,8 +364,8 @@ const RULES: Map<40> = Map([
         BANG_EQUAL,
         ParseRule {
             prefix: None,
-            infix: None,
-            presendence: Presendence::NONE,
+            infix: Some(binary),
+            presendence: Presendence::EQUALITY,
         },
     ),
     (
@@ -364,40 +380,40 @@ const RULES: Map<40> = Map([
         EQUAL_EQUAL,
         ParseRule {
             prefix: None,
-            infix: None,
-            presendence: Presendence::NONE,
+            infix: Some(binary),
+            presendence: Presendence::EQUALITY,
         },
     ),
     (
         GREATER,
         ParseRule {
             prefix: None,
-            infix: None,
-            presendence: Presendence::NONE,
+            infix: Some(binary),
+            presendence: Presendence::COMPARISON,
         },
     ),
     (
         GREATER_EQUAL,
         ParseRule {
             prefix: None,
-            infix: None,
-            presendence: Presendence::NONE,
+            infix: Some(binary),
+            presendence: Presendence::COMPARISON,
         },
     ),
     (
         LESS,
         ParseRule {
             prefix: None,
-            infix: None,
-            presendence: Presendence::NONE,
+            infix: Some(binary),
+            presendence: Presendence::COMPARISON,
         },
     ),
     (
         LESS_EQUAL,
         ParseRule {
             prefix: None,
-            infix: None,
-            presendence: Presendence::NONE,
+            infix: Some(binary),
+            presendence: Presendence::COMPARISON,
         },
     ),
     (
@@ -451,7 +467,7 @@ const RULES: Map<40> = Map([
     (
         FALSE,
         ParseRule {
-            prefix: None,
+            prefix: Some(literal),
             infix: None,
             presendence: Presendence::NONE,
         },
@@ -483,7 +499,7 @@ const RULES: Map<40> = Map([
     (
         NIL,
         ParseRule {
-            prefix: None,
+            prefix: Some(literal),
             infix: None,
             presendence: Presendence::NONE,
         },
@@ -531,7 +547,7 @@ const RULES: Map<40> = Map([
     (
         TRUE,
         ParseRule {
-            prefix: None,
+            prefix: Some(literal),
             infix: None,
             presendence: Presendence::NONE,
         },
