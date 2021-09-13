@@ -1,11 +1,14 @@
-use std::convert::TryInto;
 use std::ptr;
+use std::{alloc::Layout, convert::TryInto};
 
+use crate::memory::free_object;
+use crate::value::Obj;
+use crate::AS_OBJ_TYPE;
 use crate::{
     chunk::{Chunk, OpCode},
     compile,
     value::{print_value, Value},
-    AS_BOOL, AS_NUMBER, BOOL_VAL, NIL_VAL, NUMBER_VAL,
+    AS_BOOL, AS_NUMBER, AS_STRING, BOOL_VAL, NIL_VAL, NUMBER_VAL,
 };
 
 const STACK_MAX: usize = 256;
@@ -26,6 +29,7 @@ pub struct Vm {
     ip: *mut u8,
     stack: [Value; STACK_MAX],
     stack_top: *mut Value,
+    pub objects: *const Obj,
 }
 pub static mut VM: Vm = Vm::new();
 
@@ -36,6 +40,7 @@ impl Vm {
             ip: ptr::null_mut(),
             stack: [Value::Nil; STACK_MAX],
             stack_top: ptr::null_mut(),
+            objects: ptr::null(),
         }
     }
     pub fn init(&mut self) {
@@ -121,7 +126,18 @@ impl Vm {
                     let value = AS_NUMBER!(self.pop());
                     self.push(NUMBER_VAL!(-value));
                 }
-                OpCode::Add => BINARY_OP!(Value::Number, +),
+                OpCode::Add => {
+                    if self.peek(0).is_string() && self.peek(1).is_string() {
+                        self.concatenate();
+                    } else if self.peek(0).is_number() && self.peek(1).is_number() {
+                        let b = AS_NUMBER!(self.pop());
+                        let a = AS_NUMBER!(self.pop());
+                        self.push(Value::Number(a + b));
+                    } else {
+                        runtime_error!("Operands must be two numbers or two strings.");
+                        return Err(InterpretError::RuntimError);
+                    }
+                }
                 OpCode::Substract => BINARY_OP!(Value::Number, -),
                 OpCode::Multiply => BINARY_OP!(Value::Number, *),
                 OpCode::Divide => BINARY_OP!(Value::Number, /),
@@ -158,7 +174,31 @@ impl Vm {
             self.stack_top = self.stack_top.add(1);
         }
     }
-    pub fn free(&mut self) {}
+    pub unsafe fn free(&mut self) {
+        self.free_objectes();
+    }
+
+    unsafe fn concatenate(&mut self) {
+        let b = AS_STRING!(self.pop());
+        let a = AS_STRING!(self.pop());
+
+        let len = a.len + b.len;
+        let chars = std::alloc::realloc(ptr::null_mut(), Layout::new::<u8>(), len);
+        ptr::copy_nonoverlapping(a.chars, chars as _, a.len);
+        ptr::copy_nonoverlapping(b.chars, chars.add(a.len) as _, b.len);
+
+        let result = std::str::from_utf8_unchecked(std::slice::from_raw_parts(chars, len));
+        self.push(Value::from(result));
+    }
+
+    unsafe fn free_objectes(&mut self) {
+        let mut object = self.objects;
+        while !object.is_null() {
+            let next = AS_OBJ_TYPE!(*object, Obj::ObjString).next;
+            free_object(object);
+            object = next;
+        }
+    }
 }
 
 fn is_falsey(val: Value) -> bool {

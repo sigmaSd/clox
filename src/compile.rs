@@ -4,6 +4,7 @@ use crate::{
     chunk::{Chunk, OpCode},
     debug::disassemble_chunk,
     scanner::{self, Token, TokenType},
+    value::{copy_string, Obj, Value},
     NUMBER_VAL,
 };
 
@@ -159,20 +160,23 @@ unsafe fn number() {
         .to_str(parser.previous.length)
         .parse()
         .unwrap();
-    emit_constant(value)
+    emit_constant(NUMBER_VAL!(value))
 }
 
-unsafe fn emit_constant(value: f64) {
+unsafe fn string() {
+    let string = Value::Obj(Obj::ObjString(*copy_string(
+        parser.previous.start.add(1),
+        parser.previous.length - 2,
+    )));
+    emit_constant(string);
+}
+
+unsafe fn emit_constant(value: Value) {
     emit_bytes(OpCode::Constant.into(), make_constant(value));
 }
 
-unsafe fn make_constant(value: f64) -> u8 {
-    (*current_chunk()).add_constant(NUMBER_VAL!(value))
-    // FIXME
-    // if constant > u8::MAX {
-    //     error("Too many constants in one chunk.");
-    //     return 0;
-    // }
+unsafe fn make_constant(value: Value) -> u8 {
+    (*current_chunk()).add_constant(value)
 }
 
 unsafe fn error(message: &str) {
@@ -427,7 +431,7 @@ const RULES: Map<40> = Map([
     (
         STRING,
         ParseRule {
-            prefix: None,
+            prefix: Some(string),
             infix: None,
             presendence: Presendence::NONE,
         },

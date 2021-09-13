@@ -4,6 +4,17 @@ use std::{
     ptr::null_mut,
 };
 
+use crate::value::Obj;
+
+pub unsafe fn free_object(obj: *const Obj) {
+    match *obj {
+        Obj::ObjString(string) => {
+            free_array(string.chars as *mut u8, string.len);
+        }
+        Obj::A => todo!(),
+    }
+}
+
 pub fn grow_capacity(capacity: usize) -> usize {
     if capacity < 8 {
         8

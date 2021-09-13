@@ -1,3 +1,5 @@
+#![allow(clippy::missing_safety_doc)]
+
 mod chunk;
 use std::io::Write;
 use std::path::Path;

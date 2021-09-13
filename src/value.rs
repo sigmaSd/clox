@@ -1,18 +1,27 @@
 use std::ptr;
 
-use crate::memory::{free_array, grow_array, grow_capacity};
+use crate::{
+    memory::{free_array, grow_array, grow_capacity},
+    value::object::print_object,
+};
+
+mod object;
+pub use object::{copy_string, Obj};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Value {
     Bool(bool),
     Number(f64),
+    Obj(Obj),
     Nil,
 }
+
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Bool(l0), Self::Bool(r0)) => l0 == r0,
             (Self::Number(l0), Self::Number(r0)) => l0 == r0,
+            (Self::Obj(o1), Self::Obj(o2)) => o1 == o2,
             _ => std::mem::discriminant(self) == std::mem::discriminant(other),
         }
     }
@@ -26,6 +35,12 @@ impl Value {
     }
     pub fn is_number(&self) -> bool {
         matches!(self, Value::Number(_))
+    }
+    pub fn is_obj(&self) -> bool {
+        matches!(self, Value::Obj(_))
+    }
+    pub fn is_string(&self) -> bool {
+        self.is_obj() && (crate::AS_OBJ!(self)).is_string()
     }
 }
 
@@ -52,6 +67,12 @@ macro_rules! AS_NUMBER {
     };
 }
 #[macro_export]
+macro_rules! AS_OBJ {
+    ($val: expr) => {
+        crate::AS_VAL_TYPE!($val, crate::value::Value::Obj)
+    };
+}
+#[macro_export]
 macro_rules! BOOL_VAL {
     ($val: expr) => {{
         crate::value::Value::Bool($val)
@@ -69,12 +90,23 @@ macro_rules! NIL_VAL {
         crate::value::Value::Nil
     }};
 }
+impl From<&str> for Value {
+    fn from(string: &str) -> Self {
+        unsafe {
+            Value::Obj(Obj::ObjString(*copy_string(
+                string as *const str as _,
+                string.len(),
+            )))
+        }
+    }
+}
 
 pub fn print_value(val: &Value) {
     match val {
         Value::Bool(b) => print!("{}", b),
         Value::Number(n) => print!("{}", n),
         Value::Nil => print!("nil"),
+        Value::Obj(o) => print_object(o),
     }
 }
 
