@@ -42,6 +42,11 @@ pub unsafe fn disassemble_instruction(chunk: *const Chunk, offset: isize) -> isi
             OpCode::Equal => simple_instruction("OpEqual", offset),
             OpCode::Greater => simple_instruction("OpGreater", offset),
             OpCode::Less => simple_instruction("OpLess", offset),
+            OpCode::Print => simple_instruction("OpPrint", offset),
+            OpCode::Pop => simple_instruction("OpPop", offset),
+            OpCode::DefineGlobal => simple_instruction("OpDefineGlobal", offset),
+            OpCode::GetGlobal => simple_instruction("OpGetGlobal", offset),
+            OpCode::SetGlobal => simple_instruction("OpSetGlobal", offset),
         },
         Err(e) => {
             println!("{}", e);

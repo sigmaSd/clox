@@ -36,19 +36,18 @@ impl Table {
         free_array::<Entry>(self.entries, self.capacity);
         self.init();
     }
-    pub fn table_get(&mut self, key: *const ObjString, value: *mut Value) -> bool {
+    pub fn table_get(&mut self, key: *const ObjString) -> Option<Value> {
         unsafe {
             if self.count == 0 {
-                return false;
+                return None;
             }
 
             let entry = self.find_entry(self.entries, self.capacity, key);
             if (*entry).key.is_null() {
-                return false;
+                return None;
             }
 
-            *value = (*entry).value;
-            true
+            Some((*entry).value)
         }
     }
     pub fn table_delete(&mut self, key: *const ObjString) -> bool {

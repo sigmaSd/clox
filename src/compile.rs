@@ -14,7 +14,11 @@ pub unsafe fn compile(source: &str, chunk: &mut Chunk) -> Result<(), ()> {
     COMPILING_CHUNK = chunk;
 
     advance();
-    expression();
+
+    while !tmatch(TokenType::EOF) {
+        declaration();
+    }
+
     consume(TokenType::EOF, "Expect end of expression.");
     end_compiler();
 
@@ -23,6 +27,101 @@ pub unsafe fn compile(source: &str, chunk: &mut Chunk) -> Result<(), ()> {
     } else {
         Err(())
     }
+}
+
+unsafe fn declaration() {
+    if tmatch(TokenType::VAR) {
+        var_declaration();
+    } else {
+        statement();
+    }
+
+    if parser.panic_mode {
+        synchronize();
+    }
+}
+
+unsafe fn var_declaration() {
+    let global: u8 = parse_variable("Expect variable name.");
+
+    if tmatch(TokenType::EQUAL) {
+        expression();
+    } else {
+        emit_byte(OpCode::Nil.into());
+    }
+    consume(
+        TokenType::SEMICOLON,
+        "Expect ';' after variable declaration.",
+    );
+    define_variable(global);
+}
+
+unsafe fn define_variable(global: u8) {
+    emit_bytes(OpCode::DefineGlobal.into(), global);
+}
+
+unsafe fn parse_variable(error_message: &str) -> u8 {
+    consume(TokenType::IDENTIFIER, error_message);
+    identifier_constant(&parser.previous)
+}
+
+unsafe fn identifier_constant(name: &Token) -> u8 {
+    make_constant(OBJ_VAL!(copy_string(name.start, name.length)))
+}
+
+unsafe fn synchronize() {
+    parser.panic_mode = false;
+    while parser.current.ttype != TokenType::EOF {
+        if parser.previous.ttype == TokenType::SEMICOLON {
+            return;
+        }
+        match parser.current.ttype {
+            TokenType::CLASS
+            | TokenType::FUN
+            | TokenType::VAR
+            | TokenType::FOR
+            | TokenType::IF
+            | TokenType::WHILE
+            | TokenType::PRINT
+            | TokenType::RETURN => return,
+            _ => (),
+        }
+        advance();
+    }
+}
+
+unsafe fn statement() {
+    if tmatch(TokenType::PRINT) {
+        print_statement();
+    } else {
+        expression_statement();
+    }
+}
+
+unsafe fn expression_statement() {
+    expression();
+    consume(TokenType::SEMICOLON, "Expect ; after value.");
+    emit_byte(OpCode::Pop.into());
+}
+
+unsafe fn print_statement() {
+    expression();
+    consume(TokenType::SEMICOLON, "Expect ; after value.");
+    emit_byte(OpCode::Print.into());
+}
+
+fn tmatch(ttype: TokenType) -> bool {
+    unsafe {
+        if !check(ttype) {
+            return false;
+        }
+        advance();
+        true
+    }
+}
+
+fn check(ttype: TokenType) -> bool {
+    unsafe { parser.current.ttype == ttype }
 }
 
 unsafe fn expression() {
@@ -36,7 +135,7 @@ unsafe fn end_compiler() {
     }
 }
 
-unsafe fn binary() {
+unsafe fn binary(_can_assign: bool) {
     let operator_type = parser.previous.ttype;
     let rule = get_rule(operator_type);
     parse_presendence((rule.presendence as u8 + 1).try_into().unwrap());
@@ -56,7 +155,7 @@ unsafe fn binary() {
         _ => unreachable!(),
     }
 }
-unsafe fn literal() {
+unsafe fn literal(_can_assign: bool) {
     match parser.previous.ttype {
         TokenType::FALSE => emit_byte(OpCode::False.into()),
         TokenType::NIL => emit_byte(OpCode::Nil.into()),
@@ -68,7 +167,7 @@ unsafe fn literal() {
 fn get_rule(ttype: TokenType) -> &'static ParseRule {
     &RULES[ttype]
 }
-unsafe fn unary() {
+unsafe fn unary(_can_assign: bool) {
     let operator_type = parser.previous.ttype;
 
     parse_presendence(Presendence::UNARY);
@@ -81,25 +180,31 @@ unsafe fn unary() {
     }
 }
 
-unsafe fn grouping() {
+unsafe fn grouping(_can_assign: bool) {
     expression();
     consume(TokenType::RIGHT_PAREN, "Expect ')' after expression.");
 }
 
 unsafe fn parse_presendence(presendence: Presendence) {
     advance();
-    let prefix_rule = get_rule(parser.previous.ttype).prefix;
-    if let Some(prefix_rule) = prefix_rule {
-        prefix_rule();
+    let prefix_rule = if let Some(prefix_rule) = get_rule(parser.previous.ttype).prefix {
+        prefix_rule
     } else {
         error("Expect expression.");
         return;
-    }
+    };
+
+    let can_assign = presendence <= Presendence::ASSIGNMENT;
+    prefix_rule(can_assign);
 
     while presendence <= get_rule(parser.current.ttype).presendence {
         advance();
         let infix_rule = get_rule(parser.previous.ttype).infix.unwrap();
-        infix_rule();
+        infix_rule(can_assign);
+    }
+
+    if can_assign && tmatch(TokenType::EQUAL) {
+        error("Invalid assignment target.");
     }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -144,7 +249,7 @@ struct ParseRule {
     infix: Option<ParseFn>,
     presendence: Presendence,
 }
-type ParseFn = unsafe fn();
+type ParseFn = unsafe fn(bool);
 
 unsafe fn consume(ttype: TokenType, message: &str) {
     if parser.current.ttype == ttype {
@@ -154,7 +259,7 @@ unsafe fn consume(ttype: TokenType, message: &str) {
     error_at_current(message)
 }
 
-unsafe fn number() {
+unsafe fn number(_can_assign: bool) {
     let value: f64 = parser
         .previous
         .start
@@ -164,12 +269,26 @@ unsafe fn number() {
     emit_constant(NUMBER_VAL!(value))
 }
 
-unsafe fn string() {
+unsafe fn string(_can_assign: bool) {
     let string = OBJ_VAL!(copy_string(
         parser.previous.start.add(1),
         parser.previous.length - 2,
     ));
     emit_constant(string);
+}
+
+unsafe fn variable(can_assign: bool) {
+    named_variable(parser.previous, can_assign);
+}
+
+unsafe fn named_variable(name: Token, can_assign: bool) {
+    let arg = identifier_constant(&name);
+    if can_assign && tmatch(TokenType::EQUAL) {
+        expression();
+        emit_bytes(OpCode::SetGlobal.into(), arg);
+    } else {
+        emit_bytes(OpCode::GetGlobal.into(), arg);
+    }
 }
 
 unsafe fn emit_constant(value: Value) {
@@ -414,7 +533,7 @@ const RULES: Map<40> = Map([
     (
         IDENTIFIER,
         ParseRule {
-            prefix: None,
+            prefix: Some(variable),
             infix: None,
             presendence: Presendence::NONE,
         },

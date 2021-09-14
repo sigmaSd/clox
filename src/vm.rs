@@ -34,6 +34,7 @@ pub struct Vm {
     stack_top: *mut Value,
     pub objects: *mut Obj,
     pub strings: Table,
+    pub globals: Table,
 }
 pub static mut VM: Vm = Vm::new();
 
@@ -46,6 +47,7 @@ impl Vm {
             stack_top: ptr::null_mut(),
             objects: ptr::null_mut(),
             strings: Table::new(),
+            globals: Table::new(),
         }
     }
     pub fn init(&mut self) {
@@ -77,8 +79,15 @@ impl Vm {
             }};
         }
         macro_rules! READ_CONSTANT {
+            () => {{
+                let byte: usize = (*self.ip) as _;
+                self.ip = self.ip.add(1);
+                *(*self.chunk).constants.values.add(byte)
+            }};
+        }
+        macro_rules! READ_STRING {
             () => {
-                *(*self.chunk).constants.values.add(READ_BYTE!() as usize)
+                AS_STRING!(READ_CONSTANT!())
             };
         }
         macro_rules! BINARY_OP {
@@ -112,8 +121,6 @@ impl Vm {
 
             match READ_BYTE!() {
                 OpCode::Return => {
-                    print_value(self.pop());
-                    println!();
                     return Ok(());
                 }
                 OpCode::Constant => {
@@ -157,6 +164,36 @@ impl Vm {
                 }
                 OpCode::Greater => BINARY_OP!(Value::Bool, >),
                 OpCode::Less => BINARY_OP!(Value::Bool, <),
+                OpCode::Print => {
+                    print_value(self.pop());
+                    println!();
+                }
+                OpCode::Pop => {
+                    self.pop();
+                }
+                OpCode::DefineGlobal => {
+                    let name = READ_STRING!();
+                    // Be careful with Garbage collector
+                    self.globals.table_set(name, self.peek(0));
+                    self.pop();
+                }
+                OpCode::GetGlobal => {
+                    let name = READ_STRING!();
+                    if let Some(value) = self.globals.table_get(name) {
+                        self.push(value);
+                    } else {
+                        runtime_error!("Undefined variable '{}'.", (&*name).as_str(),);
+                        return Err(InterpretError::RuntimError);
+                    }
+                }
+                OpCode::SetGlobal => {
+                    let name = READ_STRING!();
+                    if self.globals.table_set(name, self.peek(0)) {
+                        self.globals.table_delete(name);
+                        runtime_error!("Undefined variable '{}'.", (&*name).as_str(),);
+                        return Err(InterpretError::RuntimError);
+                    }
+                }
             }
         }
     }
@@ -177,6 +214,7 @@ impl Vm {
         }
     }
     pub unsafe fn free(&mut self) {
+        self.globals.free_table();
         self.strings.free_table();
         self.free_objectes();
     }

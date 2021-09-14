@@ -47,8 +47,6 @@ pub fn free_array<T>(ptr: *mut T, old_count: usize) {
     reallocate(ptr, mem::size_of::<T>() * old_count, 0);
 }
 
-const ARRAY_LAYOUT: Layout = Layout::new::<u8>();
-
 fn reallocate<T>(ptr: *mut T, _old_size: usize, new_size: usize) -> *mut u8 {
     unsafe {
         if new_size == 0 {

@@ -2,6 +2,7 @@ use std::{alloc::Layout, mem, ptr};
 
 use crate::{
     memory::{allocate, free_array},
+    utils::Helper,
     vm::VM,
     NIL_VAL,
 };
@@ -63,10 +64,8 @@ pub struct ObjString {
     obj: Obj,
 }
 impl ObjString {
-    fn as_str(&self) -> &str {
-        unsafe {
-            std::str::from_utf8_unchecked(std::slice::from_raw_parts(self.chars as _, self.len))
-        }
+    pub fn as_str(&self) -> &str {
+        self.chars.to_str(self.len)
     }
 }
 
