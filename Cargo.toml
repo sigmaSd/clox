@@ -8,5 +8,6 @@ edition = "2021"
 [dependencies]
 
 [features]
+default = []
 DEBUG_TRACE_EXECUTION = []
 DEBUG_PRINT_CODE = []

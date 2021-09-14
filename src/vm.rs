@@ -3,6 +3,7 @@ use std::{alloc::Layout, convert::TryInto};
 
 use crate::debug::disassemble_instruction;
 use crate::memory::free_object;
+use crate::table::Table;
 use crate::value::object::take_string;
 use crate::value::Obj;
 use crate::OBJ_VAL;
@@ -32,6 +33,7 @@ pub struct Vm {
     stack: [Value; STACK_MAX],
     stack_top: *mut Value,
     pub objects: *mut Obj,
+    pub strings: Table,
 }
 pub static mut VM: Vm = Vm::new();
 
@@ -43,6 +45,7 @@ impl Vm {
             stack: [Value::Nil; STACK_MAX],
             stack_top: ptr::null_mut(),
             objects: ptr::null_mut(),
+            strings: Table::new(),
         }
     }
     pub fn init(&mut self) {
@@ -104,8 +107,8 @@ impl Vm {
                     slot = slot.add(1);
                 }
                 println!();
+                disassemble_instruction(self.chunk, self.ip.offset_from((*self.chunk).code));
             }
-            disassemble_instruction(self.chunk, self.ip.offset_from((*self.chunk).code));
 
             match READ_BYTE!() {
                 OpCode::Return => {
@@ -174,6 +177,7 @@ impl Vm {
         }
     }
     pub unsafe fn free(&mut self) {
+        self.strings.free_table();
         self.free_objectes();
     }
 

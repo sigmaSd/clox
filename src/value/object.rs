@@ -1,6 +1,10 @@
 use std::{alloc::Layout, mem, ptr};
 
-use crate::{memory::allocate, vm::VM};
+use crate::{
+    memory::{allocate, free_array},
+    vm::VM,
+    NIL_VAL,
+};
 
 use super::Value;
 
@@ -13,7 +17,7 @@ pub fn print_object(value: Value) {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Obj {
     pub otype: ObjType,
     pub next: *mut Obj,
@@ -29,29 +33,33 @@ impl Obj {
     }
 }
 
-impl PartialEq for Obj {
-    fn eq(&self, other: &Self) -> bool {
-        if self.otype != other.otype {
-            return false;
+pub fn take_string(chars: *mut u8, len: usize) -> *const ObjString {
+    unsafe {
+        let hash = hash_string(chars, len);
+        let interned = VM.strings.find_string(chars, len, hash);
+        if let Some(interned) = interned {
+            free_array(chars, len + 1);
+            return interned;
         }
-        if self.is_obj_type(ObjType::ObjString) {
-            let this = self as *const _ as *const ObjString;
-            let other = other as *const _ as *const ObjString;
-            return unsafe { (*this).as_str() == (*other).as_str() };
-        }
-        todo!()
+        allocate_string(chars, len, hash)
     }
 }
 
-pub fn take_string(chars: *mut u8, len: usize) -> *const ObjString {
-    allocate_string(chars, len)
+unsafe fn hash_string(key: *const u8, len: usize) -> u32 {
+    let mut hash: u32 = 2166136261;
+    for i in 0..len {
+        hash ^= *key.add(i) as u32;
+        hash *= 16777619;
+    }
+    hash
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[repr(C)]
 pub struct ObjString {
     pub len: usize,
     pub chars: *const u8,
+    pub hash: u32,
     obj: Obj,
 }
 impl ObjString {
@@ -64,17 +72,27 @@ impl ObjString {
 
 pub fn copy_string(chars: *const u8, len: usize) -> *const ObjString {
     unsafe {
+        let hash = hash_string(chars, len);
+        let interned = VM.strings.find_string(chars, len, hash);
+        if let Some(interned) = interned {
+            return interned;
+        }
+
         let heap_chars = allocate::<u8>(len);
         std::ptr::copy_nonoverlapping(chars, heap_chars, len);
-        allocate_string(heap_chars, len)
+        allocate_string(heap_chars, len, hash)
     }
 }
 
-fn allocate_string(chars: *mut u8, len: usize) -> *const ObjString {
+fn allocate_string(chars: *mut u8, len: usize, hash: u32) -> *const ObjString {
     unsafe {
         let string: *mut ObjString = allocate_object::<ObjString>(ObjType::ObjString) as _;
         (*string).chars = chars;
         (*string).len = len;
+        (*string).hash = hash;
+
+        VM.strings.table_set(string, NIL_VAL!());
+
         string
     }
 }

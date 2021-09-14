@@ -44,24 +44,24 @@ pub fn grow_array<T>(ptr: *mut T, old_count: usize, new_count: usize) -> *mut T 
     result as *mut T
 }
 pub fn free_array<T>(ptr: *mut T, old_count: usize) {
-    reallocate(ptr as *mut u8, mem::size_of::<T>() * old_count, 0);
+    reallocate(ptr, mem::size_of::<T>() * old_count, 0);
 }
 
 const ARRAY_LAYOUT: Layout = Layout::new::<u8>();
 
-fn reallocate(ptr: *mut u8, _old_size: usize, new_size: usize) -> *mut u8 {
+fn reallocate<T>(ptr: *mut T, _old_size: usize, new_size: usize) -> *mut u8 {
     unsafe {
         if new_size == 0 {
-            dealloc(ptr, ARRAY_LAYOUT);
+            dealloc(ptr as _, Layout::new::<T>());
             return null_mut();
         }
-        realloc(ptr, ARRAY_LAYOUT, new_size)
+        realloc(ptr as _, Layout::new::<T>(), new_size)
     }
 }
-pub unsafe fn allocate<T>(len: usize) -> *mut u8 {
+pub unsafe fn allocate<T>(len: usize) -> *mut T {
     std::alloc::realloc(
         ptr::null_mut(),
         Layout::new::<T>(),
         mem::size_of::<T>() * len,
-    )
+    ) as *mut T
 }

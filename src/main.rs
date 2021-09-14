@@ -13,6 +13,7 @@ mod vm;
 use vm::VM;
 mod compile;
 mod scanner;
+mod table;
 pub mod utils;
 
 fn main() {
