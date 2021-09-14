@@ -7,7 +7,7 @@ use super::Value;
 pub fn print_object(value: Value) {
     match crate::OBJ_TYPE!(value) {
         ObjType::ObjString => {
-            println!("{}", crate::AS_RSTRING!(value))
+            print!("{}", crate::AS_RSTRING!(value))
         }
     }
 }
@@ -23,11 +23,6 @@ pub struct Obj {
 pub enum ObjType {
     ObjString,
 }
-//#[derive(Debug, Clone, Copy)]
-//pub enum Obj {
-//    ObjString(ObjString),
-//    A,
-//}
 impl Obj {
     pub fn is_obj_type(&self, otype: ObjType) -> bool {
         self.otype == otype

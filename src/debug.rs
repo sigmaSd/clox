@@ -18,18 +18,18 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
     }
 }
 
-unsafe fn disassemble_instruction(chunk: &Chunk, offset: isize) -> isize {
+pub unsafe fn disassemble_instruction(chunk: *const Chunk, offset: isize) -> isize {
     print!("{:04} ", offset);
-    if offset > 0 && *chunk.lines.offset(offset) == *chunk.lines.offset(offset - 1) {
+    if offset > 0 && (*chunk).lines.offset(offset) == (*chunk).lines.offset(offset - 1) {
         print!("  | ");
     } else {
-        print!("{} ", *chunk.lines.offset(offset));
+        print!("{} ", *(*chunk).lines.offset(offset));
     }
 
-    match (*chunk.code.offset(offset)).try_into() {
+    match (*(*chunk).code.offset(offset)).try_into() {
         Ok(instruction) => match instruction {
             OpCode::Return => simple_instruction("OpReturn", offset),
-            OpCode::Constant => constant_instuction("OpConstant", chunk, offset),
+            OpCode::Constant => constant_instuction("OpConstant", &*chunk, offset),
             OpCode::Negate => simple_instruction("OpNegate", offset),
             OpCode::Add => simple_instruction("OpAdd", offset),
             OpCode::Substract => simple_instruction("OpSubstract", offset),

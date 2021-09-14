@@ -1,6 +1,7 @@
 use std::ptr;
 use std::{alloc::Layout, convert::TryInto};
 
+use crate::debug::disassemble_instruction;
 use crate::memory::free_object;
 use crate::value::object::take_string;
 use crate::value::Obj;
@@ -95,19 +96,16 @@ impl Vm {
             if cfg!(feature = "DEBUG_TRACE_EXECUTION") {
                 print!("           ");
                 let mut slot: *mut Value = &mut self.stack as _;
-                loop {
+                while slot < self.stack_top {
                     print!("[ ");
                     print_value(*slot);
                     print!(" ]");
 
                     slot = slot.add(1);
-                    if slot == self.stack_top {
-                        break;
-                    }
                 }
                 println!();
-                //   disassemble_instruction(self.chunk, self.ip - self.chunk.code);
             }
+            disassemble_instruction(self.chunk, self.ip.offset_from((*self.chunk).code));
 
             match READ_BYTE!() {
                 OpCode::Return => {
