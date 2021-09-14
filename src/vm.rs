@@ -2,8 +2,9 @@ use std::ptr;
 use std::{alloc::Layout, convert::TryInto};
 
 use crate::memory::free_object;
+use crate::value::object::take_string;
 use crate::value::Obj;
-use crate::AS_OBJ_TYPE;
+use crate::OBJ_VAL;
 use crate::{
     chunk::{Chunk, OpCode},
     compile,
@@ -29,7 +30,7 @@ pub struct Vm {
     ip: *mut u8,
     stack: [Value; STACK_MAX],
     stack_top: *mut Value,
-    pub objects: *const Obj,
+    pub objects: *mut Obj,
 }
 pub static mut VM: Vm = Vm::new();
 
@@ -40,7 +41,7 @@ impl Vm {
             ip: ptr::null_mut(),
             stack: [Value::Nil; STACK_MAX],
             stack_top: ptr::null_mut(),
-            objects: ptr::null(),
+            objects: ptr::null_mut(),
         }
     }
     pub fn init(&mut self) {
@@ -96,7 +97,7 @@ impl Vm {
                 let mut slot: *mut Value = &mut self.stack as _;
                 loop {
                     print!("[ ");
-                    print_value(&*slot);
+                    print_value(*slot);
                     print!(" ]");
 
                     slot = slot.add(1);
@@ -110,7 +111,7 @@ impl Vm {
 
             match READ_BYTE!() {
                 OpCode::Return => {
-                    print_value(&self.pop());
+                    print_value(self.pop());
                     println!();
                     return Ok(());
                 }
@@ -179,22 +180,22 @@ impl Vm {
     }
 
     unsafe fn concatenate(&mut self) {
-        let b = AS_STRING!(self.pop());
-        let a = AS_STRING!(self.pop());
+        let b = *AS_STRING!(self.pop());
+        let a = *AS_STRING!(self.pop());
 
         let len = a.len + b.len;
         let chars = std::alloc::realloc(ptr::null_mut(), Layout::new::<u8>(), len);
         ptr::copy_nonoverlapping(a.chars, chars as _, a.len);
         ptr::copy_nonoverlapping(b.chars, chars.add(a.len) as _, b.len);
 
-        let result = std::str::from_utf8_unchecked(std::slice::from_raw_parts(chars, len));
-        self.push(Value::from(result));
+        let result = take_string(chars, len);
+        self.push(OBJ_VAL!(result));
     }
 
     unsafe fn free_objectes(&mut self) {
         let mut object = self.objects;
         while !object.is_null() {
-            let next = AS_OBJ_TYPE!(*object, Obj::ObjString).next;
+            let next = (*object).next;
             free_object(object);
             object = next;
         }

@@ -2,17 +2,18 @@ use std::ptr;
 
 use crate::{
     memory::{free_array, grow_array, grow_capacity},
-    value::object::print_object,
+    value::object::{print_object, ObjType},
 };
 
-mod object;
+pub mod object;
 pub use object::{copy_string, Obj};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Value {
     Bool(bool),
     Number(f64),
-    Obj(Obj),
+    // points to a heap allocated Object
+    Obj(*const Obj),
     Nil,
 }
 
@@ -40,7 +41,7 @@ impl Value {
         matches!(self, Value::Obj(_))
     }
     pub fn is_string(&self) -> bool {
-        self.is_obj() && (crate::AS_OBJ!(self)).is_string()
+        unsafe { self.is_obj() && (**crate::AS_OBJ!(self)).is_obj_type(ObjType::ObjString) }
     }
 }
 
@@ -90,23 +91,19 @@ macro_rules! NIL_VAL {
         crate::value::Value::Nil
     }};
 }
-impl From<&str> for Value {
-    fn from(string: &str) -> Self {
-        unsafe {
-            Value::Obj(Obj::ObjString(*copy_string(
-                string as *const str as _,
-                string.len(),
-            )))
-        }
-    }
+#[macro_export]
+macro_rules! OBJ_VAL {
+    ($obj: expr) => {{
+        crate::value::Value::Obj($obj as *const Obj)
+    }};
 }
 
-pub fn print_value(val: &Value) {
+pub fn print_value(val: Value) {
     match val {
         Value::Bool(b) => print!("{}", b),
         Value::Number(n) => print!("{}", n),
         Value::Nil => print!("nil"),
-        Value::Obj(o) => print_object(o),
+        Value::Obj(_) => print_object(val),
     }
 }
 

@@ -1,11 +1,12 @@
-use std::{ops::Index, ptr, slice};
+use std::{ops::Index, ptr};
 
 use crate::{
     chunk::{Chunk, OpCode},
     debug::disassemble_chunk,
     scanner::{self, Token, TokenType},
+    utils::Helper,
     value::{copy_string, Obj, Value},
-    NUMBER_VAL,
+    NUMBER_VAL, OBJ_VAL,
 };
 
 pub unsafe fn compile(source: &str, chunk: &mut Chunk) -> Result<(), ()> {
@@ -164,10 +165,10 @@ unsafe fn number() {
 }
 
 unsafe fn string() {
-    let string = Value::Obj(Obj::ObjString(*copy_string(
+    let string = OBJ_VAL!(copy_string(
         parser.previous.start.add(1),
         parser.previous.length - 2,
-    )));
+    ));
     emit_constant(string);
 }
 
@@ -245,16 +246,6 @@ unsafe fn error_at(token: &Token, message: &str) {
     }
     eprintln!(": {}", message);
     parser.had_error = true;
-}
-
-trait Helper {
-    fn to_str<'a>(self, len: usize) -> &'a str;
-}
-
-impl Helper for *const u8 {
-    fn to_str<'a>(self, len: usize) -> &'a str {
-        unsafe { std::str::from_utf8_unchecked(slice::from_raw_parts(self, len)) }
-    }
 }
 
 struct Map<const N: usize>([(TokenType, ParseRule); N]);

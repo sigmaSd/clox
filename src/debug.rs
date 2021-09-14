@@ -55,7 +55,7 @@ fn constant_instuction(name: &str, chunk: &Chunk, offset: isize) -> isize {
     print!("{} {:} '", name, constant);
     unsafe {
         let value = *chunk.constants.values.add(constant);
-        print_value(&value);
+        print_value(value);
     }
     println!("'");
     offset + 2

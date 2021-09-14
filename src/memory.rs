@@ -1,18 +1,27 @@
 use std::{
     alloc::{dealloc, realloc, Layout},
     mem, process,
-    ptr::null_mut,
+    ptr::{self, null_mut},
 };
 
-use crate::value::Obj;
+use crate::value::{
+    object::{ObjString, ObjType},
+    Obj,
+};
 
 pub unsafe fn free_object(obj: *const Obj) {
-    match *obj {
-        Obj::ObjString(string) => {
+    match (*obj).otype {
+        ObjType::ObjString => {
+            let string: *const ObjString = obj as _;
+            let string = *string;
             free_array(string.chars as *mut u8, string.len);
+            free::<ObjString>(obj);
         }
-        Obj::A => todo!(),
     }
+}
+
+unsafe fn free<T>(obj: *const Obj) {
+    realloc(obj as _, Layout::new::<T>(), 0);
 }
 
 pub fn grow_capacity(capacity: usize) -> usize {
@@ -48,4 +57,11 @@ fn reallocate(ptr: *mut u8, _old_size: usize, new_size: usize) -> *mut u8 {
         }
         realloc(ptr, ARRAY_LAYOUT, new_size)
     }
+}
+pub unsafe fn allocate<T>(len: usize) -> *mut u8 {
+    std::alloc::realloc(
+        ptr::null_mut(),
+        Layout::new::<T>(),
+        mem::size_of::<T>() * len,
+    )
 }
