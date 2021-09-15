@@ -11,6 +11,7 @@ use crate::{
 
 pub unsafe fn compile(source: &str, chunk: &mut Chunk) -> Result<(), ()> {
     scanner::init_scanner(source);
+    init_compiler(&mut current);
     COMPILING_CHUNK = chunk;
 
     advance();
@@ -57,12 +58,67 @@ unsafe fn var_declaration() {
 }
 
 unsafe fn define_variable(global: u8) {
+    if current.scope_depth > 0 {
+        mark_initialized();
+        return;
+    }
+
     emit_bytes(OpCode::DefineGlobal.into(), global);
+}
+
+unsafe fn mark_initialized() {
+    current.locals[current.local_count - 1].depth = Some(current.scope_depth);
 }
 
 unsafe fn parse_variable(error_message: &str) -> u8 {
     consume(TokenType::IDENTIFIER, error_message);
+
+    declare_variable();
+    if current.scope_depth > 0 {
+        return 0;
+    }
+
     identifier_constant(&parser.previous)
+}
+
+unsafe fn declare_variable() {
+    if current.scope_depth == 0 {
+        return;
+    }
+
+    let name = parser.previous;
+
+    for i in (0..current.local_count).rev() {
+        let local = &current.locals[i];
+        if local.depth.is_some() && local.depth.unwrap() < current.scope_depth {
+            break;
+        }
+
+        if identifiers_equal(&name, &local.name) {
+            error("Already a variable with this name in this scope.");
+        }
+    }
+
+    add_local(name);
+}
+
+unsafe fn identifiers_equal(name1: &Token, name2: &Token) -> bool {
+    if name1.length != name2.length {
+        return false;
+    }
+    name1.start.to_str(name1.length) == name2.start.to_str(name2.length)
+}
+
+unsafe fn add_local(name: Token) {
+    if current.local_count == U8_COUNT {
+        error("Too many local variables in function.");
+        return;
+    }
+
+    let local = &mut current.locals[current.local_count];
+    current.local_count += 1;
+    local.name = name;
+    local.depth = None;
 }
 
 unsafe fn identifier_constant(name: &Token) -> u8 {
@@ -93,9 +149,38 @@ unsafe fn synchronize() {
 unsafe fn statement() {
     if tmatch(TokenType::PRINT) {
         print_statement();
+    } else if tmatch(TokenType::LEFT_BRACE) {
+        begin_scope();
+        block();
+        end_scope();
     } else {
         expression_statement();
     }
+}
+
+unsafe fn end_scope() {
+    current.scope_depth -= 1;
+
+    while current.local_count > 0
+        && current.locals[current.local_count - 1]
+            .depth
+            .map(|depth| depth > current.scope_depth)
+            .unwrap_or(false)
+    {
+        emit_byte(OpCode::Pop.into());
+        current.local_count -= 1;
+    }
+}
+
+unsafe fn begin_scope() {
+    current.scope_depth += 1;
+}
+
+unsafe fn block() {
+    while !check(TokenType::RIGHT_BRACE) && !check(TokenType::EOF) {
+        declaration();
+    }
+    consume(TokenType::RIGHT_BRACE, "Expect '}' after block.");
 }
 
 unsafe fn expression_statement() {
@@ -251,6 +336,36 @@ struct ParseRule {
 }
 type ParseFn = unsafe fn(bool);
 
+const U8_COUNT: usize = u8::MAX as usize + 1;
+
+#[derive(Debug)]
+struct Compiler {
+    locals: [Local; U8_COUNT],
+    local_count: usize,
+    scope_depth: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Local {
+    name: Token,
+    depth: Option<usize>,
+}
+
+#[allow(non_upper_case_globals)]
+static mut current: Compiler = Compiler {
+    locals: [Local {
+        name: Token::new_uninit(),
+        depth: Some(0),
+    }; U8_COUNT],
+    local_count: 0,
+    scope_depth: 0,
+};
+
+unsafe fn init_compiler(compiler: &mut Compiler) {
+    compiler.local_count = 0;
+    compiler.scope_depth = 0;
+}
+
 unsafe fn consume(ttype: TokenType, message: &str) {
     if parser.current.ttype == ttype {
         advance();
@@ -282,13 +397,40 @@ unsafe fn variable(can_assign: bool) {
 }
 
 unsafe fn named_variable(name: Token, can_assign: bool) {
-    let arg = identifier_constant(&name);
+    let mut arg = resolve_local(&current, &name);
+
+    let get_op;
+    let set_op;
+    if arg.is_some() {
+        get_op = OpCode::GetLocal;
+        set_op = OpCode::SetLocal;
+    } else {
+        arg = Some(identifier_constant(&name));
+        get_op = OpCode::GetGlobal;
+        set_op = OpCode::SetGlobal;
+    }
+    let arg = arg.unwrap();
+
     if can_assign && tmatch(TokenType::EQUAL) {
         expression();
-        emit_bytes(OpCode::SetGlobal.into(), arg);
+        emit_bytes(set_op.into(), arg);
     } else {
-        emit_bytes(OpCode::GetGlobal.into(), arg);
+        emit_bytes(get_op.into(), arg);
     }
+}
+
+unsafe fn resolve_local(compiler: &Compiler, name: &Token) -> Option<u8> {
+    for i in (0..compiler.local_count).rev() {
+        let local = &compiler.locals[i];
+        if identifiers_equal(name, &local.name) {
+            if local.depth.is_none() {
+                error("Can't read local variable in its own initializer.");
+            }
+            // locals fit in u8
+            return Some(i.try_into().unwrap());
+        }
+    }
+    None
 }
 
 unsafe fn emit_constant(value: Value) {

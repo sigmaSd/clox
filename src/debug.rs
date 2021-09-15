@@ -47,12 +47,20 @@ pub unsafe fn disassemble_instruction(chunk: *const Chunk, offset: isize) -> isi
             OpCode::DefineGlobal => simple_instruction("OpDefineGlobal", offset),
             OpCode::GetGlobal => simple_instruction("OpGetGlobal", offset),
             OpCode::SetGlobal => simple_instruction("OpSetGlobal", offset),
+            OpCode::GetLocal => byte_instruction("OpGetLocal", chunk, offset),
+            OpCode::SetLocal => byte_instruction("OpSetLocal", chunk, offset),
         },
         Err(e) => {
             println!("{}", e);
             offset + 1
         }
     }
+}
+
+fn byte_instruction(name: &str, chunk: *const Chunk, offset: isize) -> isize {
+    let slot = unsafe { *(*chunk).code.offset(offset + 1) };
+    println!("{} {}", name, slot);
+    offset + 2
 }
 
 fn constant_instuction(name: &str, chunk: &Chunk, offset: isize) -> isize {

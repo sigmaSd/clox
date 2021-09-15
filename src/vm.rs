@@ -73,16 +73,16 @@ impl Vm {
     unsafe fn run(&mut self) -> Result<(), InterpretError> {
         macro_rules! READ_BYTE {
             () => {{
-                let opcode: OpCode = (*self.ip).try_into().unwrap();
+                //let opcode: OpCode = (*self.ip).try_into().unwrap();
+                let byte = *self.ip;
                 self.ip = self.ip.add(1);
-                opcode
+                byte
+                //opcode
             }};
         }
         macro_rules! READ_CONSTANT {
             () => {{
-                let byte: usize = (*self.ip) as _;
-                self.ip = self.ip.add(1);
-                *(*self.chunk).constants.values.add(byte)
+                *(*self.chunk).constants.values.add(READ_BYTE!() as usize)
             }};
         }
         macro_rules! READ_STRING {
@@ -119,7 +119,7 @@ impl Vm {
                 disassemble_instruction(self.chunk, self.ip.offset_from((*self.chunk).code));
             }
 
-            match READ_BYTE!() {
+            match READ_BYTE!().try_into().unwrap() {
                 OpCode::Return => {
                     return Ok(());
                 }
@@ -193,6 +193,14 @@ impl Vm {
                         runtime_error!("Undefined variable '{}'.", (&*name).as_str(),);
                         return Err(InterpretError::RuntimError);
                     }
+                }
+                OpCode::GetLocal => {
+                    let slot = READ_BYTE!();
+                    self.push(self.stack[slot as usize]);
+                }
+                OpCode::SetLocal => {
+                    let slot = READ_BYTE!();
+                    self.stack[slot as usize] = self.peek(0);
                 }
             }
         }

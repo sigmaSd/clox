@@ -50,7 +50,7 @@ unsafe fn hash_string(key: *const u8, len: usize) -> u32 {
     let mut hash: u32 = 2166136261;
     for i in 0..len {
         hash ^= *key.add(i) as u32;
-        hash *= 16777619;
+        hash = hash.wrapping_mul(16777619);
     }
     hash
 }
