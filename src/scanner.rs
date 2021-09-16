@@ -102,7 +102,7 @@ unsafe fn identifier_type() -> TokenType {
             match *scanner.start.add(1) as char {
                 'a' => check_keyword(2, 3, "lse", FALSE),
                 'o' => check_keyword(2, 1, "r", FOR),
-                'n' => check_keyword(2, 1, "n", FUN),
+                'u' => check_keyword(2, 1, "n", FUN),
                 _ => IDENTIFIER,
             }
         }

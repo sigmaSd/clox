@@ -49,12 +49,27 @@ pub unsafe fn disassemble_instruction(chunk: *const Chunk, offset: isize) -> isi
             OpCode::SetGlobal => simple_instruction("OpSetGlobal", offset),
             OpCode::GetLocal => byte_instruction("OpGetLocal", chunk, offset),
             OpCode::SetLocal => byte_instruction("OpSetLocal", chunk, offset),
+            OpCode::Jump => jump_instruction("OpJump", 1, chunk, offset),
+            OpCode::JumpIfFalse => jump_instruction("OpJumpIfFalse", 1, chunk, offset),
+            OpCode::Loop => jump_instruction("OpLoop", -1, chunk, offset),
         },
         Err(e) => {
             println!("{}", e);
             offset + 1
         }
     }
+}
+
+unsafe fn jump_instruction(name: &str, sign: isize, chunk: *const Chunk, offset: isize) -> isize {
+    let mut jump: u16 = ((*(*chunk).code.offset(offset + 1) as u16) << 8) as _;
+    jump |= *(*chunk).code.offset(offset + 2) as u16;
+    println!(
+        "{} {} -> {}",
+        name,
+        offset,
+        offset + 3 + sign * jump as isize
+    );
+    offset + 3
 }
 
 fn byte_instruction(name: &str, chunk: *const Chunk, offset: isize) -> isize {

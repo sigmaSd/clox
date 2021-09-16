@@ -66,6 +66,26 @@ unsafe fn define_variable(global: u8) {
     emit_bytes(OpCode::DefineGlobal.into(), global);
 }
 
+unsafe fn and_(_can_assign: bool) {
+    let end_jump = emit_jump(OpCode::JumpIfFalse.into());
+
+    emit_byte(OpCode::Pop.into());
+    parse_presendence(Presendence::AND);
+
+    patch_jump(end_jump);
+}
+
+unsafe fn or_(_can_assign: bool) {
+    let else_jump = emit_jump(OpCode::JumpIfFalse.into());
+    let end_jump = emit_jump(OpCode::Jump.into());
+
+    patch_jump(else_jump);
+    emit_byte(OpCode::Pop.into());
+
+    parse_presendence(Presendence::OR);
+    patch_jump(end_jump);
+}
+
 unsafe fn mark_initialized() {
     current.locals[current.local_count - 1].depth = Some(current.scope_depth);
 }
@@ -149,6 +169,12 @@ unsafe fn synchronize() {
 unsafe fn statement() {
     if tmatch(TokenType::PRINT) {
         print_statement();
+    } else if tmatch(TokenType::FOR) {
+        for_statement();
+    } else if tmatch(TokenType::IF) {
+        if_statement();
+    } else if tmatch(TokenType::WHILE) {
+        while_statement();
     } else if tmatch(TokenType::LEFT_BRACE) {
         begin_scope();
         block();
@@ -158,6 +184,112 @@ unsafe fn statement() {
     }
 }
 
+unsafe fn for_statement() {
+    begin_scope();
+    consume(TokenType::LEFT_PAREN, "Expect '(' after 'for'.");
+    if tmatch(TokenType::SEMICOLON) {
+        // no initializer
+    } else if tmatch(TokenType::VAR) {
+        var_declaration();
+    } else {
+        expression_statement();
+    }
+
+    let mut loop_start = (*current_chunk()).count;
+    let mut exit_jump = None;
+    if !tmatch(TokenType::SEMICOLON) {
+        expression();
+        consume(TokenType::SEMICOLON, "Expect ';' after loop condition.");
+        exit_jump = Some(emit_jump(OpCode::JumpIfFalse.into()));
+        emit_byte(OpCode::Pop.into());
+    }
+
+    if !tmatch(TokenType::RIGHT_PAREN) {
+        let body_jump = emit_jump(OpCode::Jump.into());
+        let increment_start = (*current_chunk()).count;
+        expression();
+        emit_byte(OpCode::Pop.into());
+        consume(TokenType::RIGHT_PAREN, "Expect ')' after for clauses.");
+
+        emit_loop(loop_start);
+        loop_start = increment_start;
+        patch_jump(body_jump);
+    }
+
+    statement();
+    emit_loop(loop_start);
+
+    if let Some(exit_jump) = exit_jump {
+        patch_jump(exit_jump);
+        emit_byte(OpCode::Pop.into());
+    }
+
+    end_scope();
+}
+
+unsafe fn if_statement() {
+    consume(TokenType::LEFT_PAREN, "Expect '(' after 'if'.");
+    expression();
+    consume(TokenType::RIGHT_PAREN, "Expect ')' after condition.");
+
+    let then_jump = emit_jump(OpCode::JumpIfFalse.into());
+    emit_byte(OpCode::Pop.into());
+    statement();
+
+    let else_jump = emit_jump(OpCode::Jump.into());
+    patch_jump(then_jump);
+    emit_byte(OpCode::Pop.into());
+
+    if tmatch(TokenType::ELSE) {
+        statement();
+    }
+    patch_jump(else_jump);
+}
+
+unsafe fn while_statement() {
+    let loop_start = (*current_chunk()).count;
+    consume(TokenType::LEFT_PAREN, "Expect '(' after 'while'.");
+    expression();
+    consume(TokenType::RIGHT_PAREN, "Expect ')' after condition.");
+
+    let exit_jump = emit_jump(OpCode::JumpIfFalse.into());
+    emit_byte(OpCode::Pop.into());
+    statement();
+    emit_loop(loop_start);
+
+    patch_jump(exit_jump);
+    emit_byte(OpCode::Pop.into());
+}
+
+unsafe fn emit_loop(loop_start: usize) {
+    emit_byte(OpCode::Loop.into());
+
+    let offset = (*current_chunk()).count - loop_start + 2;
+    if offset > u16::MAX as _ {
+        error("Loop body too large.");
+    }
+
+    emit_byte(((offset >> 8) & 0xff) as _);
+    emit_byte((offset & 0xff) as _);
+}
+
+unsafe fn patch_jump(offset: usize) {
+    let jump = (*current_chunk()).count - offset - 2;
+
+    if jump > u16::MAX as usize {
+        error("Too much code to jump over.");
+    }
+
+    *(*current_chunk()).code.add(offset) = ((jump >> 8) & 0xff) as u8;
+    *(*current_chunk()).code.add(offset + 1) = (jump & 0xff) as u8;
+}
+
+unsafe fn emit_jump(instruction: u8) -> usize {
+    emit_byte(instruction);
+    emit_byte(0xff);
+    emit_byte(0xff);
+    (*current_chunk()).count - 2
+}
 unsafe fn end_scope() {
     current.scope_depth -= 1;
 
@@ -185,7 +317,7 @@ unsafe fn block() {
 
 unsafe fn expression_statement() {
     expression();
-    consume(TokenType::SEMICOLON, "Expect ; after value.");
+    consume(TokenType::SEMICOLON, "Expect ';' after expression.");
     emit_byte(OpCode::Pop.into());
 }
 
@@ -272,6 +404,7 @@ unsafe fn grouping(_can_assign: bool) {
 
 unsafe fn parse_presendence(presendence: Presendence) {
     advance();
+
     let prefix_rule = if let Some(prefix_rule) = get_rule(parser.previous.ttype).prefix {
         prefix_rule
     } else {
@@ -700,8 +833,8 @@ const RULES: Map<40> = Map([
         AND,
         ParseRule {
             prefix: None,
-            infix: None,
-            presendence: Presendence::NONE,
+            infix: Some(and_),
+            presendence: Presendence::AND,
         },
     ),
     (
@@ -764,8 +897,8 @@ const RULES: Map<40> = Map([
         OR,
         ParseRule {
             prefix: None,
-            infix: None,
-            presendence: Presendence::NONE,
+            infix: Some(or_),
+            presendence: Presendence::OR,
         },
     ),
     (

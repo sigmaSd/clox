@@ -85,6 +85,12 @@ impl Vm {
                 *(*self.chunk).constants.values.add(READ_BYTE!() as usize)
             }};
         }
+        macro_rules! READ_SHORT {
+            () => {{
+                self.ip = self.ip.add(2);
+                (((*self.ip.offset(-2) as u16) << 8) | (*self.ip.offset(-1) as u16))
+            }};
+        }
         macro_rules! READ_STRING {
             () => {
                 AS_STRING!(READ_CONSTANT!())
@@ -201,6 +207,20 @@ impl Vm {
                 OpCode::SetLocal => {
                     let slot = READ_BYTE!();
                     self.stack[slot as usize] = self.peek(0);
+                }
+                OpCode::JumpIfFalse => {
+                    let offset = READ_SHORT!();
+                    if is_falsey(self.peek(0)) {
+                        self.ip = self.ip.add(offset as _);
+                    }
+                }
+                OpCode::Jump => {
+                    let offset = READ_SHORT!();
+                    self.ip = self.ip.add(offset as _);
+                }
+                OpCode::Loop => {
+                    let offset = READ_SHORT!();
+                    self.ip = self.ip.offset(-(offset as isize));
                 }
             }
         }
