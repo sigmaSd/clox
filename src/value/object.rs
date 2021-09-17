@@ -1,6 +1,7 @@
-use std::{alloc::Layout, mem, ptr};
+use std::{alloc::Layout, fmt::Display, mem, ptr};
 
 use crate::{
+    chunk::Chunk,
     memory::{allocate, free_array},
     utils::Helper,
     vm::VM,
@@ -11,8 +12,64 @@ use super::Value;
 
 pub fn print_object(value: Value) {
     match crate::OBJ_TYPE!(value) {
-        ObjType::ObjString => {
+        ObjType::String => {
             print!("{}", crate::AS_RSTRING!(value))
+        }
+        ObjType::Function => {
+            print!("{}", unsafe { *crate::AS_FUNCTION!(value) });
+        }
+        ObjType::Native => {
+            print!("<native fn>");
+        }
+    }
+}
+
+pub type NativeFn = fn(usize, *const Value) -> Value;
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ObjNative {
+    obj: Obj,
+    pub function: NativeFn,
+}
+
+impl ObjNative {
+    pub fn new(function: NativeFn) -> *mut ObjNative {
+        unsafe {
+            let native: *mut ObjNative = allocate_object(ObjType::Native);
+            (*native).function = function;
+            native
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ObjFunction {
+    obj: Obj,
+    pub arity: usize,
+    pub chunk: Chunk,
+    pub name: *mut ObjString,
+}
+impl Display for ObjFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if !self.name.is_null() {
+            unsafe { write!(f, "<fn {}>", (*self.name).as_str()) }
+        } else {
+            write!(f, "<script>")
+        }
+    }
+}
+
+impl ObjFunction {
+    pub fn new() -> *mut ObjFunction {
+        unsafe {
+            let function: *mut ObjFunction = allocate_object(ObjType::Function);
+            (*function).arity = 0;
+            (*function).name = ptr::null_mut();
+            (*function).chunk.init();
+
+            function
         }
     }
 }
@@ -24,9 +81,10 @@ pub struct Obj {
     pub next: *mut Obj,
 }
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-#[repr(C)]
 pub enum ObjType {
-    ObjString,
+    Function,
+    Native,
+    String,
 }
 impl Obj {
     pub fn is_obj_type(&self, otype: ObjType) -> bool {
@@ -58,10 +116,10 @@ unsafe fn hash_string(key: *const u8, len: usize) -> u32 {
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[repr(C)]
 pub struct ObjString {
+    pub obj: Obj,
     pub len: usize,
     pub chars: *const u8,
     pub hash: u32,
-    obj: Obj,
 }
 impl ObjString {
     pub fn as_str(&self) -> &str {
@@ -85,7 +143,7 @@ pub fn copy_string(chars: *const u8, len: usize) -> *const ObjString {
 
 fn allocate_string(chars: *mut u8, len: usize, hash: u32) -> *const ObjString {
     unsafe {
-        let string: *mut ObjString = allocate_object::<ObjString>(ObjType::ObjString) as _;
+        let string: *mut ObjString = allocate_object::<ObjString>(ObjType::String);
         (*string).chars = chars;
         (*string).len = len;
         (*string).hash = hash;
@@ -96,7 +154,7 @@ fn allocate_string(chars: *mut u8, len: usize, hash: u32) -> *const ObjString {
     }
 }
 
-pub unsafe fn allocate_object<T>(otype: ObjType) -> *mut Obj {
+pub unsafe fn allocate_object<T>(otype: ObjType) -> *mut T {
     let object: *mut Obj =
         std::alloc::realloc(ptr::null_mut(), Layout::new::<T>(), mem::size_of::<T>()) as _;
 
@@ -104,7 +162,8 @@ pub unsafe fn allocate_object<T>(otype: ObjType) -> *mut Obj {
     (*object).next = VM.objects;
     VM.objects = object;
 
-    object
+    (*object).otype = otype;
+    object as _
 }
 
 #[macro_export]
@@ -128,8 +187,23 @@ macro_rules! AS_OBJ_TYPE {
 #[macro_export]
 macro_rules! AS_STRING {
     ($value: expr) => {
-        crate::AS_OBJ!($value) as *const u8 as *const crate::value::object::ObjString
+        crate::AS_OBJ!($value) as *const crate::value::object::ObjString
     };
+}
+
+#[macro_export]
+macro_rules! AS_FUNCTION {
+    ($value: expr) => {
+        crate::AS_OBJ!($value) as *mut crate::value::object::ObjFunction
+    };
+}
+
+#[macro_export]
+macro_rules! AS_NATIVE {
+    ($value: expr) => {{
+        let native = crate::AS_OBJ!($value) as *mut crate::value::object::ObjNative;
+        (*native).function
+    }};
 }
 
 #[macro_export]

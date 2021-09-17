@@ -5,17 +5,25 @@ use std::{
 };
 
 use crate::value::{
-    object::{ObjString, ObjType},
+    object::{ObjFunction, ObjNative, ObjString, ObjType},
     Obj,
 };
 
 pub unsafe fn free_object(obj: *const Obj) {
     match (*obj).otype {
-        ObjType::ObjString => {
+        ObjType::String => {
             let string: *const ObjString = obj as _;
             let string = *string;
             free_array(string.chars as *mut u8, string.len);
             free::<ObjString>(obj);
+        }
+        ObjType::Function => {
+            let function: *mut ObjFunction = obj as _;
+            (*function).chunk.free();
+            free::<ObjFunction>(obj);
+        }
+        ObjType::Native => {
+            free::<ObjNative>(obj);
         }
     }
 }

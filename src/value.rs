@@ -41,7 +41,13 @@ impl Value {
         matches!(self, Value::Obj(_))
     }
     pub fn is_string(&self) -> bool {
-        unsafe { self.is_obj() && (**crate::AS_OBJ!(self)).is_obj_type(ObjType::ObjString) }
+        unsafe { self.is_obj() && (**crate::AS_OBJ!(self)).is_obj_type(ObjType::String) }
+    }
+    pub fn is_function(&self) -> bool {
+        unsafe { self.is_obj() && (**crate::AS_OBJ!(self)).is_obj_type(ObjType::Function) }
+    }
+    pub fn is_native(&self) -> bool {
+        unsafe { self.is_obj() && (**crate::AS_OBJ!(self)).is_obj_type(ObjType::Native) }
     }
 }
 
@@ -107,7 +113,7 @@ pub fn print_value(val: Value) {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ValueArray {
     pub count: usize,
     capacity: usize,
@@ -141,11 +147,5 @@ impl ValueArray {
     pub fn free(&mut self) {
         free_array::<Value>(self.values, self.capacity);
         self.init();
-    }
-}
-
-impl Drop for ValueArray {
-    fn drop(&mut self) {
-        self.free();
     }
 }

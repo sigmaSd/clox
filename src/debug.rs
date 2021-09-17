@@ -52,6 +52,7 @@ pub unsafe fn disassemble_instruction(chunk: *const Chunk, offset: isize) -> isi
             OpCode::Jump => jump_instruction("OpJump", 1, chunk, offset),
             OpCode::JumpIfFalse => jump_instruction("OpJumpIfFalse", 1, chunk, offset),
             OpCode::Loop => jump_instruction("OpLoop", -1, chunk, offset),
+            OpCode::Call => byte_instruction("OpCall", chunk, offset),
         },
         Err(e) => {
             println!("{}", e);

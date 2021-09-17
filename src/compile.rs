@@ -5,14 +5,14 @@ use crate::{
     debug::disassemble_chunk,
     scanner::{self, Token, TokenType},
     utils::Helper,
-    value::{copy_string, Obj, Value},
+    value::{copy_string, object::ObjFunction, Obj, Value},
     NUMBER_VAL, OBJ_VAL,
 };
 
-pub unsafe fn compile(source: &str, chunk: &mut Chunk) -> Result<(), ()> {
+pub unsafe fn compile(source: &str) -> Result<*mut ObjFunction, ()> {
     scanner::init_scanner(source);
-    init_compiler(&mut current);
-    COMPILING_CHUNK = chunk;
+    let mut compiler = Compiler::new();
+    init_compiler(&mut compiler, FunctionType::Script);
 
     advance();
 
@@ -21,17 +21,19 @@ pub unsafe fn compile(source: &str, chunk: &mut Chunk) -> Result<(), ()> {
     }
 
     consume(TokenType::EOF, "Expect end of expression.");
-    end_compiler();
+    let function = end_compiler();
 
     if !parser.had_error {
-        Ok(())
+        Ok(function)
     } else {
         Err(())
     }
 }
 
 unsafe fn declaration() {
-    if tmatch(TokenType::VAR) {
+    if tmatch(TokenType::FUN) {
+        fun_declaration();
+    } else if tmatch(TokenType::VAR) {
         var_declaration();
     } else {
         statement();
@@ -40,6 +42,40 @@ unsafe fn declaration() {
     if parser.panic_mode {
         synchronize();
     }
+}
+
+unsafe fn fun_declaration() {
+    let global = parse_variable("Expect function name.");
+    mark_initialized();
+    function(FunctionType::Function);
+    define_variable(global);
+}
+
+unsafe fn function(ftype: FunctionType) {
+    let mut compiler = Compiler::new();
+    init_compiler(&mut compiler, ftype);
+    begin_scope();
+
+    consume(TokenType::LEFT_PAREN, "Expect '(' after function name.");
+    if !check(TokenType::RIGHT_PAREN) {
+        do_while(
+            &mut || {
+                (*(*current).function).arity += 1;
+                if (*(*current).function).arity > 255 {
+                    error_at_current("Can't have more than 255 parameters.");
+                }
+                let constant = parse_variable("Expect parameter name.");
+                define_variable(constant);
+            },
+            &|| tmatch(TokenType::COMMA),
+        );
+    }
+    consume(TokenType::RIGHT_PAREN, "Expect ')' after parameters.");
+    consume(TokenType::LEFT_BRACE, "Expect '{' before function body.");
+    block();
+
+    let function = end_compiler();
+    emit_bytes(OpCode::Constant.into(), make_constant(OBJ_VAL!(function)));
 }
 
 unsafe fn var_declaration() {
@@ -58,7 +94,7 @@ unsafe fn var_declaration() {
 }
 
 unsafe fn define_variable(global: u8) {
-    if current.scope_depth > 0 {
+    if (*current).scope_depth > 0 {
         mark_initialized();
         return;
     }
@@ -87,14 +123,17 @@ unsafe fn or_(_can_assign: bool) {
 }
 
 unsafe fn mark_initialized() {
-    current.locals[current.local_count - 1].depth = Some(current.scope_depth);
+    if (*current).scope_depth == 0 {
+        return;
+    }
+    (*current).locals[(*current).local_count - 1].depth = Some((*current).scope_depth);
 }
 
 unsafe fn parse_variable(error_message: &str) -> u8 {
     consume(TokenType::IDENTIFIER, error_message);
 
     declare_variable();
-    if current.scope_depth > 0 {
+    if (*current).scope_depth > 0 {
         return 0;
     }
 
@@ -102,15 +141,15 @@ unsafe fn parse_variable(error_message: &str) -> u8 {
 }
 
 unsafe fn declare_variable() {
-    if current.scope_depth == 0 {
+    if (*current).scope_depth == 0 {
         return;
     }
 
     let name = parser.previous;
 
-    for i in (0..current.local_count).rev() {
-        let local = &current.locals[i];
-        if local.depth.is_some() && local.depth.unwrap() < current.scope_depth {
+    for i in (0..(*current).local_count).rev() {
+        let local = &(*current).locals[i];
+        if local.depth.is_some() && local.depth.unwrap() < (*current).scope_depth {
             break;
         }
 
@@ -130,13 +169,13 @@ unsafe fn identifiers_equal(name1: &Token, name2: &Token) -> bool {
 }
 
 unsafe fn add_local(name: Token) {
-    if current.local_count == U8_COUNT {
+    if (*current).local_count == U8_COUNT {
         error("Too many local variables in function.");
         return;
     }
 
-    let local = &mut current.locals[current.local_count];
-    current.local_count += 1;
+    let local = &mut (*current).locals[(*current).local_count];
+    (*current).local_count += 1;
     local.name = name;
     local.depth = None;
 }
@@ -173,6 +212,8 @@ unsafe fn statement() {
         for_statement();
     } else if tmatch(TokenType::IF) {
         if_statement();
+    } else if tmatch(TokenType::RETURN) {
+        return_statement();
     } else if tmatch(TokenType::WHILE) {
         while_statement();
     } else if tmatch(TokenType::LEFT_BRACE) {
@@ -181,6 +222,20 @@ unsafe fn statement() {
         end_scope();
     } else {
         expression_statement();
+    }
+}
+
+unsafe fn return_statement() {
+    if (*current).ftype == FunctionType::Script {
+        error("Can't return from top-level code.");
+    }
+
+    if tmatch(TokenType::SEMICOLON) {
+        emit_return();
+    } else {
+        expression();
+        consume(TokenType::SEMICOLON, "Expect ';' after return value.");
+        emit_byte(OpCode::Return.into());
     }
 }
 
@@ -291,21 +346,21 @@ unsafe fn emit_jump(instruction: u8) -> usize {
     (*current_chunk()).count - 2
 }
 unsafe fn end_scope() {
-    current.scope_depth -= 1;
+    (*current).scope_depth -= 1;
 
-    while current.local_count > 0
-        && current.locals[current.local_count - 1]
+    while (*current).local_count > 0
+        && (*current).locals[(*current).local_count - 1]
             .depth
-            .map(|depth| depth > current.scope_depth)
+            .map(|depth| depth > (*current).scope_depth)
             .unwrap_or(false)
     {
         emit_byte(OpCode::Pop.into());
-        current.local_count -= 1;
+        (*current).local_count -= 1;
     }
 }
 
 unsafe fn begin_scope() {
-    current.scope_depth += 1;
+    (*current).scope_depth += 1;
 }
 
 unsafe fn block() {
@@ -345,11 +400,24 @@ unsafe fn expression() {
     parse_presendence(Presendence::ASSIGNMENT);
 }
 
-unsafe fn end_compiler() {
+unsafe fn end_compiler() -> *mut ObjFunction {
     emit_return();
+    let function = (*current).function;
+
     if cfg!(feature = "DEBUG_PRINT_CODE") && !parser.had_error {
-        disassemble_chunk(&*current_chunk(), "code");
+        disassemble_chunk(
+            &*current_chunk(),
+            if !(*function).name.is_null() {
+                (*(*function).name).as_str()
+            } else {
+                "<script>"
+            },
+        );
     }
+
+    current = (*current).enclosing;
+
+    function
 }
 
 unsafe fn binary(_can_assign: bool) {
@@ -372,6 +440,29 @@ unsafe fn binary(_can_assign: bool) {
         _ => unreachable!(),
     }
 }
+unsafe fn call(_can_assign: bool) {
+    let arg_count = argument_list();
+    emit_bytes(OpCode::Call.into(), arg_count);
+}
+
+unsafe fn argument_list() -> u8 {
+    let mut arg_count = 0;
+    if !check(TokenType::RIGHT_PAREN) {
+        do_while(
+            &mut || {
+                expression();
+                if arg_count == 255 {
+                    error("Can't have more than 255 arguments.");
+                }
+                arg_count += 1;
+            },
+            &|| tmatch(TokenType::COMMA),
+        );
+    }
+    consume(TokenType::RIGHT_PAREN, "Expect ')' after arguments.");
+    arg_count
+}
+
 unsafe fn literal(_can_assign: bool) {
     match parser.previous.ttype {
         TokenType::FALSE => emit_byte(OpCode::False.into()),
@@ -469,13 +560,34 @@ struct ParseRule {
 }
 type ParseFn = unsafe fn(bool);
 
-const U8_COUNT: usize = u8::MAX as usize + 1;
+pub const U8_COUNT: usize = u8::MAX as usize + 1;
 
 #[derive(Debug)]
 struct Compiler {
+    enclosing: *mut Compiler,
+    function: *mut ObjFunction,
+    ftype: FunctionType,
     locals: [Local; U8_COUNT],
     local_count: usize,
     scope_depth: usize,
+}
+
+impl Compiler {
+    fn new() -> Self {
+        Self {
+            enclosing: ptr::null_mut(),
+            function: ptr::null_mut(),
+            ftype: FunctionType::Script,
+            locals: [Local::new(); U8_COUNT],
+            local_count: 0,
+            scope_depth: 0,
+        }
+    }
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FunctionType {
+    Function,
+    Script,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -484,19 +596,51 @@ struct Local {
     depth: Option<usize>,
 }
 
-#[allow(non_upper_case_globals)]
-static mut current: Compiler = Compiler {
-    locals: [Local {
-        name: Token::new_uninit(),
-        depth: Some(0),
-    }; U8_COUNT],
-    local_count: 0,
-    scope_depth: 0,
-};
+impl Local {
+    const fn new() -> Self {
+        Self {
+            name: Token::new_uninit(),
+            depth: Some(0),
+        }
+    }
+}
 
-unsafe fn init_compiler(compiler: &mut Compiler) {
-    compiler.local_count = 0;
-    compiler.scope_depth = 0;
+#[allow(non_upper_case_globals)]
+static mut current: *mut Compiler = ptr::null_mut();
+//Compiler {
+//    enclosing: ptr::null_mut(),
+//    function: ptr::null_mut(),
+//    ftype: FunctionType::Script,
+//    locals: [Local {
+//        name: Token::new_uninit(),
+//        depth: Some(0),
+//    }; U8_COUNT],
+//    local_count: 0,
+//    scope_depth: 0,
+//};
+
+unsafe fn init_compiler(compiler: *mut Compiler, ftype: FunctionType) {
+    (*compiler).enclosing = current;
+    // For GC
+    (*compiler).function = ptr::null_mut();
+    (*compiler).ftype = ftype;
+
+    (*compiler).local_count = 0;
+    (*compiler).scope_depth = 0;
+    (*compiler).function = ObjFunction::new();
+
+    current = compiler;
+
+    if ftype != FunctionType::Script {
+        (*(*current).function).name =
+            copy_string(parser.previous.start, parser.previous.length) as *mut _;
+    }
+
+    let local = &mut (*current).locals[(*current).local_count];
+    (*current).local_count += 1;
+    local.depth = Some(0);
+    local.name.start = "" as *const str as _;
+    local.name.length = 0
 }
 
 unsafe fn consume(ttype: TokenType, message: &str) {
@@ -518,10 +662,8 @@ unsafe fn number(_can_assign: bool) {
 }
 
 unsafe fn string(_can_assign: bool) {
-    let string = OBJ_VAL!(copy_string(
-        parser.previous.start.add(1),
-        parser.previous.length - 2,
-    ));
+    let s = copy_string(parser.previous.start.add(1), parser.previous.length - 2);
+    let string = OBJ_VAL!(s);
     emit_constant(string);
 }
 
@@ -530,7 +672,7 @@ unsafe fn variable(can_assign: bool) {
 }
 
 unsafe fn named_variable(name: Token, can_assign: bool) {
-    let mut arg = resolve_local(&current, &name);
+    let mut arg = resolve_local(&(*current), &name);
 
     let get_op;
     let set_op;
@@ -571,7 +713,12 @@ unsafe fn emit_constant(value: Value) {
 }
 
 unsafe fn make_constant(value: Value) -> u8 {
-    (*current_chunk()).add_constant(value)
+    let constant = (*current_chunk()).add_constant(value);
+    if constant > u8::MAX as usize {
+        error("Too many constants in one chunk.");
+        return 0;
+    }
+    constant as u8
 }
 
 unsafe fn error(message: &str) {
@@ -579,6 +726,7 @@ unsafe fn error(message: &str) {
 }
 
 unsafe fn emit_return() {
+    emit_byte(OpCode::Nil.into());
     emit_byte(OpCode::Return.into())
 }
 
@@ -595,7 +743,6 @@ static mut parser: Parser = Parser {
     had_error: false,
     panic_mode: false,
 };
-static mut COMPILING_CHUNK: *mut Chunk = ptr::null_mut();
 
 unsafe fn advance() {
     parser.previous = parser.current;
@@ -619,7 +766,7 @@ unsafe fn emit_byte(byte: u8) {
 }
 
 unsafe fn current_chunk() -> *mut Chunk {
-    COMPILING_CHUNK
+    &mut (*(*current).function).chunk
 }
 
 unsafe fn error_at_current(message: &str) {
@@ -657,8 +804,8 @@ const RULES: Map<40> = Map([
         LEFT_PAREN,
         ParseRule {
             prefix: Some(grouping),
-            infix: None,
-            presendence: Presendence::NONE,
+            infix: Some(call),
+            presendence: Presendence::CALL,
         },
     ),
     (
@@ -974,3 +1121,10 @@ const RULES: Map<40> = Map([
         },
     ),
 ]);
+
+fn do_while(f: &mut dyn FnMut(), cond: &dyn Fn() -> bool) {
+    f();
+    while cond() {
+        f();
+    }
+}

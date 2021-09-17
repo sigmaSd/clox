@@ -2,7 +2,6 @@ use crate::{
     memory::{free_array, grow_array, grow_capacity},
     value::Value,
 };
-use std::convert::TryInto;
 use std::{convert::TryFrom, ptr};
 
 use crate::value::ValueArray;
@@ -34,7 +33,7 @@ macro_rules! gen_opcode {
     }
 )}
 
-gen_opcode!(Loop Return Constant Nil True False Pop Equal Greater Less Add Substract Multiply Divide Not Negate Print Jump JumpIfFalse DefineGlobal GetLocal SetLocal GetGlobal SetGlobal);
+gen_opcode!(Loop Call Return Constant Nil True False Pop Equal Greater Less Add Substract Multiply Divide Not Negate Print Jump JumpIfFalse DefineGlobal GetLocal SetLocal GetGlobal SetGlobal);
 
 impl From<OpCode> for u8 {
     fn from(code: OpCode) -> Self {
@@ -42,7 +41,7 @@ impl From<OpCode> for u8 {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Chunk {
     pub count: usize,
     capacity: usize,
@@ -85,14 +84,8 @@ impl Chunk {
         self.constants.free();
         self.init();
     }
-    pub fn add_constant(&mut self, value: Value) -> u8 {
+    pub fn add_constant(&mut self, value: Value) -> usize {
         self.constants.write(value);
-        (self.constants.count - 1).try_into().unwrap()
-    }
-}
-
-impl Drop for Chunk {
-    fn drop(&mut self) {
-        self.free();
+        self.constants.count - 1
     }
 }
