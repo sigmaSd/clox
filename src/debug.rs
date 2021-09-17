@@ -1,6 +1,7 @@
 use crate::{
     chunk::{Chunk, OpCode},
     value::print_value,
+    AS_FUNCTION,
 };
 use std::convert::TryInto;
 
@@ -18,7 +19,7 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
     }
 }
 
-pub unsafe fn disassemble_instruction(chunk: *const Chunk, offset: isize) -> isize {
+pub unsafe fn disassemble_instruction(chunk: *const Chunk, mut offset: isize) -> isize {
     print!("{:04} ", offset);
     if offset > 0 && (*chunk).lines.offset(offset) == (*chunk).lines.offset(offset - 1) {
         print!("  | ");
@@ -53,6 +54,33 @@ pub unsafe fn disassemble_instruction(chunk: *const Chunk, offset: isize) -> isi
             OpCode::JumpIfFalse => jump_instruction("OpJumpIfFalse", 1, chunk, offset),
             OpCode::Loop => jump_instruction("OpLoop", -1, chunk, offset),
             OpCode::Call => byte_instruction("OpCall", chunk, offset),
+            OpCode::Closure => {
+                offset += 1;
+                let constant = *(*chunk).code.offset(offset);
+                offset += 1;
+                print!("OpClosure {} ", constant);
+                print_value(*(*chunk).constants.values.add(constant as _));
+                println!();
+
+                let function = AS_FUNCTION!(*(*chunk).constants.values.add(constant as _));
+                for _ in 0..(*function).upvalue_count {
+                    let is_local: bool = (*(*chunk).code.offset(offset)) == 0;
+                    offset += 1;
+                    let index = *(*chunk).code.offset(offset);
+                    offset += 1;
+                    println!(
+                        "{}    |              {} {}",
+                        offset - 2,
+                        if is_local { "local" } else { "upvalue" },
+                        index
+                    );
+                }
+
+                offset
+            }
+            OpCode::GetUpValue => byte_instruction("OpGetUpValue", chunk, offset),
+            OpCode::SetUpValue => byte_instruction("OpSetUpValue", chunk, offset),
+            OpCode::CloseUpValue => simple_instruction("OpCloseUpValue", offset),
         },
         Err(e) => {
             println!("{}", e);

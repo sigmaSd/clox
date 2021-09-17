@@ -33,7 +33,7 @@ macro_rules! gen_opcode {
     }
 )}
 
-gen_opcode!(Loop Call Return Constant Nil True False Pop Equal Greater Less Add Substract Multiply Divide Not Negate Print Jump JumpIfFalse DefineGlobal GetLocal SetLocal GetGlobal SetGlobal);
+gen_opcode!(Loop Call Closure CloseUpValue Return Constant Nil True False Pop Equal Greater Less Add Substract Multiply Divide Not Negate Print Jump JumpIfFalse DefineGlobal GetLocal SetLocal GetGlobal SetGlobal GetUpValue SetUpValue);
 
 impl From<OpCode> for u8 {
     fn from(code: OpCode) -> Self {

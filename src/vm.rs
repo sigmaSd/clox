@@ -5,15 +5,15 @@ use crate::compile::{compile, U8_COUNT};
 use crate::debug::disassemble_instruction;
 use crate::memory::free_object;
 use crate::table::Table;
-use crate::value::object::ObjFunction;
-use crate::value::object::{take_string, NativeFn, ObjNative, ObjType};
+use crate::value::object::ObjClosure;
+use crate::value::object::{take_string, NativeFn, ObjNative, ObjType, ObjUpValue};
 use crate::value::{copy_string, Obj};
 use crate::{
     chunk::OpCode,
     value::{print_value, Value},
     AS_BOOL, AS_NUMBER, AS_STRING, BOOL_VAL, NIL_VAL, NUMBER_VAL,
 };
-use crate::{AS_FUNCTION, AS_NATIVE, OBJ_TYPE, OBJ_VAL};
+use crate::{AS_CLOSURE, AS_FUNCTION, AS_NATIVE, OBJ_TYPE, OBJ_VAL};
 
 macro_rules! runtime_error {
        ($($arg:tt)*) => ({
@@ -22,7 +22,7 @@ macro_rules! runtime_error {
            unsafe {
             for i in (0..VM.frame_count).rev() {
                    let frame = &VM.frames[i];
-                   let function = frame.function;
+                   let function = (*frame.closure).function;
                    let instruction = frame.ip.offset_from((*function).chunk.code) -1;
                    let line = *(*function).chunk.lines.offset(instruction);
                    eprint!("[line {}] in ", line);
@@ -48,20 +48,21 @@ pub struct Vm {
     stack_top: *mut Value,
     pub objects: *mut Obj,
     pub strings: Table,
+    pub open_upvalues: *mut ObjUpValue,
     pub globals: Table,
 }
 pub static mut VM: Vm = Vm::new();
 
 #[derive(Debug, Clone, Copy)]
 struct CallFrame {
-    function: *mut ObjFunction,
+    closure: *mut ObjClosure,
     ip: *mut u8,
     slots: *mut Value,
 }
 impl CallFrame {
     const fn new() -> Self {
         Self {
-            function: ptr::null_mut(),
+            closure: ptr::null_mut(),
             ip: ptr::null_mut(),
             slots: ptr::null_mut(),
         }
@@ -78,6 +79,7 @@ impl Vm {
             objects: ptr::null_mut(),
             strings: Table::new(),
             globals: Table::new(),
+            open_upvalues: ptr::null_mut(),
         }
     }
     pub fn init(&mut self) {
@@ -97,7 +99,10 @@ impl Vm {
             let function = function.unwrap();
 
             self.push(OBJ_VAL!(function));
-            let _ = self.call(function, 0);
+            let closure = ObjClosure::new(function);
+            self.pop();
+            self.push(OBJ_VAL!(closure));
+            let _ = self.call(closure, 0);
 
             self.run()
         }
@@ -116,7 +121,7 @@ impl Vm {
         }
         macro_rules! READ_CONSTANT {
             () => {{
-                *(*(*frame).function)
+                *(*(*(*frame).closure).function)
                     .chunk
                     .constants
                     .values
@@ -161,14 +166,17 @@ impl Vm {
                 }
                 println!();
                 disassemble_instruction(
-                    &(*(*frame).function).chunk,
-                    (*frame).ip.offset_from(((*(*frame).function).chunk).code),
+                    &(*(*(*frame).closure).function).chunk,
+                    (*frame)
+                        .ip
+                        .offset_from((*(*(*frame).closure).function).chunk.code),
                 );
             }
 
             match READ_BYTE!().try_into().unwrap() {
                 OpCode::Return => {
                     let result = self.pop();
+                    self.close_upvalues((*frame).slots);
                     self.frame_count -= 1;
                     if self.frame_count == 0 {
                         self.pop();
@@ -278,6 +286,34 @@ impl Vm {
                     }
                     frame = &mut self.frames[self.frame_count - 1];
                 }
+                OpCode::Closure => {
+                    let function = AS_FUNCTION!(READ_CONSTANT!());
+                    let closure = ObjClosure::new(function);
+                    self.push(OBJ_VAL!(closure));
+                    for i in 0..(*closure).upvalue_count {
+                        let is_local = READ_BYTE!();
+                        let index = READ_BYTE!();
+                        if is_local != 0 {
+                            *(*closure).upvalues.add(i) =
+                                capture_upvalue((*frame).slots.add(index as _));
+                        } else {
+                            *(*closure).upvalues.add(i) =
+                                *(*(*frame).closure).upvalues.add(index as _);
+                        }
+                    }
+                }
+                OpCode::GetUpValue => {
+                    let slot = READ_BYTE!();
+                    self.push(*(*(*(*(*frame).closure).upvalues.add(slot as _))).location);
+                }
+                OpCode::SetUpValue => {
+                    let slot = READ_BYTE!();
+                    *(*(*(*(*frame).closure).upvalues.add(slot as _))).location = self.peek(0);
+                }
+                OpCode::CloseUpValue => {
+                    self.close_upvalues(self.stack_top.offset(-1));
+                    self.pop();
+                }
             }
         }
     }
@@ -334,11 +370,11 @@ impl Vm {
             object = next;
         }
     }
-    unsafe fn call(&mut self, function: *mut ObjFunction, arg_count: isize) -> Result<(), ()> {
-        if arg_count != (*function).arity.try_into().unwrap() {
+    unsafe fn call(&mut self, closure: *mut ObjClosure, arg_count: isize) -> Result<(), ()> {
+        if arg_count != (*(*closure).function).arity.try_into().unwrap() {
             runtime_error!(
                 "Expected {} arguments but got {}.",
-                (*function).arity,
+                (*(*closure).function).arity,
                 arg_count
             );
             return Err(());
@@ -351,17 +387,50 @@ impl Vm {
 
         let frame = &mut self.frames[self.frame_count];
         self.frame_count += 1;
-        frame.function = function;
-        frame.ip = (*function).chunk.code;
+        frame.closure = closure;
+        frame.ip = (*(*closure).function).chunk.code;
         frame.slots = self.stack_top.offset(-arg_count - 1);
         Ok(())
     }
+
+    pub(crate) fn close_upvalues(&mut self, last: *mut Value) {
+        unsafe {
+            while !self.open_upvalues.is_null() && (*self.open_upvalues).location >= last {
+                let upvalue = self.open_upvalues;
+                (*upvalue).closed = *(*upvalue).location;
+                (*upvalue).location = &mut (*upvalue).closed;
+                self.open_upvalues = (*upvalue).next;
+            }
+        }
+    }
+}
+
+unsafe fn capture_upvalue(local: *mut Value) -> *mut crate::value::object::ObjUpValue {
+    let mut prev_upvalue = ptr::null_mut();
+    let mut upvalue = VM.open_upvalues;
+    while !upvalue.is_null() && (*upvalue).location > local {
+        prev_upvalue = upvalue;
+        upvalue = (*upvalue).next;
+    }
+
+    if !upvalue.is_null() && (*upvalue).location == local {
+        return upvalue;
+    }
+
+    let created_upvalue = ObjUpValue::new(local);
+    (*created_upvalue).next = upvalue;
+    if prev_upvalue.is_null() {
+        VM.open_upvalues = created_upvalue;
+    } else {
+        (*prev_upvalue).next = created_upvalue;
+    }
+    created_upvalue
 }
 
 fn call_value(callee: Value, arg_count: isize) -> Result<(), ()> {
     if callee.is_obj() {
         match OBJ_TYPE!(callee) {
-            ObjType::Function => return unsafe { VM.call(AS_FUNCTION!(callee), arg_count) },
+            ObjType::Closure => return unsafe { VM.call(AS_CLOSURE!(callee), arg_count) },
 
             ObjType::Native => unsafe {
                 let native = AS_NATIVE!(callee);

@@ -49,6 +49,9 @@ impl Value {
     pub fn is_native(&self) -> bool {
         unsafe { self.is_obj() && (**crate::AS_OBJ!(self)).is_obj_type(ObjType::Native) }
     }
+    pub fn is_closure(&self) -> bool {
+        unsafe { self.is_obj() && (**crate::AS_OBJ!(self)).is_obj_type(ObjType::Closure) }
+    }
 }
 
 #[macro_export]

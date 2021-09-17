@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::value::{
-    object::{ObjFunction, ObjNative, ObjString, ObjType},
+    object::{ObjClosure, ObjFunction, ObjNative, ObjString, ObjType, ObjUpValue},
     Obj,
 };
 
@@ -24,6 +24,14 @@ pub unsafe fn free_object(obj: *const Obj) {
         }
         ObjType::Native => {
             free::<ObjNative>(obj);
+        }
+        ObjType::Closure => {
+            let closure: *mut ObjClosure = obj as _;
+            free_array((*closure).upvalues, (*closure).upvalue_count);
+            free::<ObjClosure>(obj);
+        }
+        ObjType::UpValue => {
+            free::<ObjUpValue>(obj);
         }
     }
 }

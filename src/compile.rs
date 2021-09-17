@@ -75,7 +75,12 @@ unsafe fn function(ftype: FunctionType) {
     block();
 
     let function = end_compiler();
-    emit_bytes(OpCode::Constant.into(), make_constant(OBJ_VAL!(function)));
+    emit_bytes(OpCode::Closure.into(), make_constant(OBJ_VAL!(function)));
+
+    for i in 0..(*function).upvalue_count {
+        emit_byte(if compiler.upvalues[i].is_local { 1 } else { 0 });
+        emit_byte(compiler.upvalues[i].index);
+    }
 }
 
 unsafe fn var_declaration() {
@@ -178,6 +183,7 @@ unsafe fn add_local(name: Token) {
     (*current).local_count += 1;
     local.name = name;
     local.depth = None;
+    local.is_captured = false;
 }
 
 unsafe fn identifier_constant(name: &Token) -> u8 {
@@ -354,7 +360,11 @@ unsafe fn end_scope() {
             .map(|depth| depth > (*current).scope_depth)
             .unwrap_or(false)
     {
-        emit_byte(OpCode::Pop.into());
+        if (*current).locals[(*current).local_count - 1].is_captured {
+            emit_byte(OpCode::CloseUpValue.into());
+        } else {
+            emit_byte(OpCode::Pop.into());
+        }
         (*current).local_count -= 1;
     }
 }
@@ -568,8 +578,24 @@ struct Compiler {
     function: *mut ObjFunction,
     ftype: FunctionType,
     locals: [Local; U8_COUNT],
+    upvalues: [UpValue; U8_COUNT],
     local_count: usize,
     scope_depth: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct UpValue {
+    index: u8,
+    is_local: bool,
+}
+
+impl UpValue {
+    const fn new() -> Self {
+        Self {
+            index: 0,
+            is_local: false,
+        }
+    }
 }
 
 impl Compiler {
@@ -578,6 +604,7 @@ impl Compiler {
             enclosing: ptr::null_mut(),
             function: ptr::null_mut(),
             ftype: FunctionType::Script,
+            upvalues: [UpValue::new(); U8_COUNT],
             locals: [Local::new(); U8_COUNT],
             local_count: 0,
             scope_depth: 0,
@@ -594,6 +621,7 @@ enum FunctionType {
 struct Local {
     name: Token,
     depth: Option<usize>,
+    is_captured: bool,
 }
 
 impl Local {
@@ -601,6 +629,7 @@ impl Local {
         Self {
             name: Token::new_uninit(),
             depth: Some(0),
+            is_captured: false,
         }
     }
 }
@@ -639,6 +668,7 @@ unsafe fn init_compiler(compiler: *mut Compiler, ftype: FunctionType) {
     let local = &mut (*current).locals[(*current).local_count];
     (*current).local_count += 1;
     local.depth = Some(0);
+    local.is_captured = false;
     local.name.start = "" as *const str as _;
     local.name.length = 0
 }
@@ -679,12 +709,16 @@ unsafe fn named_variable(name: Token, can_assign: bool) {
     if arg.is_some() {
         get_op = OpCode::GetLocal;
         set_op = OpCode::SetLocal;
+    } else if resolve_upvalue(&mut (*current), &name).is_some() {
+        arg = resolve_upvalue(&mut (*current), &name);
+        get_op = OpCode::GetUpValue;
+        set_op = OpCode::SetUpValue;
     } else {
-        arg = Some(identifier_constant(&name));
+        arg = Some(identifier_constant(&name) as _);
         get_op = OpCode::GetGlobal;
         set_op = OpCode::SetGlobal;
     }
-    let arg = arg.unwrap();
+    let arg = arg.unwrap().try_into().unwrap();
 
     if can_assign && tmatch(TokenType::EQUAL) {
         expression();
@@ -694,15 +728,58 @@ unsafe fn named_variable(name: Token, can_assign: bool) {
     }
 }
 
-unsafe fn resolve_local(compiler: &Compiler, name: &Token) -> Option<u8> {
+fn resolve_upvalue(compiler: &mut Compiler, name: &Token) -> Option<usize> {
+    if compiler.enclosing.is_null() {
+        return None;
+    }
+
+    if let Some(local) = unsafe { resolve_local(&*compiler.enclosing, name) } {
+        unsafe {
+            (*compiler.enclosing).locals[local].is_captured = true;
+        }
+        return Some(add_upvalue(compiler, local as u8, true));
+    }
+
+    if let Some(upvalue) = unsafe { resolve_upvalue(&mut *compiler.enclosing, name) } {
+        return Some(add_upvalue(compiler, upvalue as u8, false));
+    }
+
+    None
+}
+
+fn add_upvalue(compiler: &mut Compiler, index: u8, is_local: bool) -> usize {
+    unsafe {
+        let upvalue_count = (*compiler.function).upvalue_count;
+
+        for i in 0..upvalue_count {
+            let upvalue = &compiler.upvalues[i];
+            if upvalue.index == index && upvalue.is_local == is_local {
+                return i;
+            }
+        }
+
+        if upvalue_count == U8_COUNT {
+            error("Too many closure variables in function.");
+            return 0;
+        }
+
+        compiler.upvalues[upvalue_count].is_local = is_local;
+        compiler.upvalues[upvalue_count].index = index;
+
+        let v = (*compiler.function).upvalue_count;
+        (*compiler.function).upvalue_count += 1;
+        v
+    }
+}
+
+unsafe fn resolve_local(compiler: &Compiler, name: &Token) -> Option<usize> {
     for i in (0..compiler.local_count).rev() {
         let local = &compiler.locals[i];
         if identifiers_equal(name, &local.name) {
             if local.depth.is_none() {
                 error("Can't read local variable in its own initializer.");
             }
-            // locals fit in u8
-            return Some(i.try_into().unwrap());
+            return Some(i);
         }
     }
     None

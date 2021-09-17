@@ -21,6 +21,59 @@ pub fn print_object(value: Value) {
         ObjType::Native => {
             print!("<native fn>");
         }
+        ObjType::Closure => {
+            print!("{}", unsafe { *(*crate::AS_CLOSURE!(value)).function });
+        }
+        ObjType::UpValue => {
+            print!("upvalue");
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ObjUpValue {
+    obj: Obj,
+    pub location: *mut Value,
+    pub closed: Value,
+    pub next: *mut ObjUpValue,
+}
+
+impl ObjUpValue {
+    pub fn new(slot: *mut Value) -> *mut Self {
+        unsafe {
+            let upvalue: *mut ObjUpValue = allocate_object(ObjType::UpValue);
+            (*upvalue).location = slot;
+            (*upvalue).closed = NIL_VAL!();
+            (*upvalue).next = ptr::null_mut();
+            upvalue
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ObjClosure {
+    obj: Obj,
+    pub function: *mut ObjFunction,
+    pub upvalues: *mut *mut ObjUpValue,
+    pub upvalue_count: usize,
+}
+
+impl ObjClosure {
+    pub fn new(function: *mut ObjFunction) -> *mut Self {
+        unsafe {
+            let upvalues: *mut *mut ObjUpValue = allocate((*function).upvalue_count);
+            for i in 0..(*function).upvalue_count {
+                *upvalues.add(i) = ptr::null_mut();
+            }
+
+            let closure: *mut ObjClosure = allocate_object(ObjType::Closure);
+            (*closure).function = function;
+            (*closure).upvalues = upvalues;
+            (*closure).upvalue_count = (*function).upvalue_count;
+            closure
+        }
     }
 }
 
@@ -48,6 +101,7 @@ impl ObjNative {
 pub struct ObjFunction {
     obj: Obj,
     pub arity: usize,
+    pub upvalue_count: usize,
     pub chunk: Chunk,
     pub name: *mut ObjString,
 }
@@ -66,6 +120,7 @@ impl ObjFunction {
         unsafe {
             let function: *mut ObjFunction = allocate_object(ObjType::Function);
             (*function).arity = 0;
+            (*function).upvalue_count = 0;
             (*function).name = ptr::null_mut();
             (*function).chunk.init();
 
@@ -85,6 +140,8 @@ pub enum ObjType {
     Function,
     Native,
     String,
+    Closure,
+    UpValue,
 }
 impl Obj {
     pub fn is_obj_type(&self, otype: ObjType) -> bool {
@@ -203,6 +260,13 @@ macro_rules! AS_NATIVE {
     ($value: expr) => {{
         let native = crate::AS_OBJ!($value) as *mut crate::value::object::ObjNative;
         (*native).function
+    }};
+}
+
+#[macro_export]
+macro_rules! AS_CLOSURE {
+    ($value: expr) => {{
+        crate::AS_OBJ!($value) as *mut crate::value::object::ObjClosure
     }};
 }
 
