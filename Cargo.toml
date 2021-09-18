@@ -11,3 +11,5 @@ edition = "2021"
 default = []
 DEBUG_TRACE_EXECUTION = []
 DEBUG_PRINT_CODE = []
+DEBUG_LOG_GC = []
+DEBUG_STRESS_GC = []

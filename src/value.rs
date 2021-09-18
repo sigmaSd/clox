@@ -124,7 +124,7 @@ pub struct ValueArray {
 }
 
 impl ValueArray {
-    pub fn new() -> Self {
+    pub fn _new() -> Self {
         Self {
             count: 0,
             capacity: 0,

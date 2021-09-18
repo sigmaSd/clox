@@ -55,16 +55,18 @@ pub unsafe fn disassemble_instruction(chunk: *const Chunk, mut offset: isize) ->
             OpCode::Loop => jump_instruction("OpLoop", -1, chunk, offset),
             OpCode::Call => byte_instruction("OpCall", chunk, offset),
             OpCode::Closure => {
+                dbg!(offset);
                 offset += 1;
                 let constant = *(*chunk).code.offset(offset);
                 offset += 1;
                 print!("OpClosure {} ", constant);
+                //dbg!(*(*chunk).constants.values.add(9));
                 print_value(*(*chunk).constants.values.add(constant as _));
                 println!();
 
                 let function = AS_FUNCTION!(*(*chunk).constants.values.add(constant as _));
                 for _ in 0..(*function).upvalue_count {
-                    let is_local: bool = (*(*chunk).code.offset(offset)) == 0;
+                    let is_local: bool = (*(*chunk).code.offset(offset)) == 1;
                     offset += 1;
                     let index = *(*chunk).code.offset(offset);
                     offset += 1;
@@ -76,7 +78,7 @@ pub unsafe fn disassemble_instruction(chunk: *const Chunk, mut offset: isize) ->
                     );
                 }
 
-                offset
+                dbg!(offset)
             }
             OpCode::GetUpValue => byte_instruction("OpGetUpValue", chunk, offset),
             OpCode::SetUpValue => byte_instruction("OpSetUpValue", chunk, offset),

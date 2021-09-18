@@ -3,6 +3,7 @@ use std::{ops::Index, ptr};
 use crate::{
     chunk::{Chunk, OpCode},
     debug::disassemble_chunk,
+    memory::mark_object,
     scanner::{self, Token, TokenType},
     utils::Helper,
     value::{copy_string, object::ObjFunction, Obj, Value},
@@ -27,6 +28,14 @@ pub unsafe fn compile(source: &str) -> Result<*mut ObjFunction, ()> {
         Ok(function)
     } else {
         Err(())
+    }
+}
+
+pub unsafe fn mark_compiler_roots() {
+    let mut compiler = current;
+    while !compiler.is_null() {
+        mark_object((*compiler).function as _);
+        compiler = (*compiler).enclosing;
     }
 }
 

@@ -3,7 +3,7 @@ use std::{alloc::Layout, convert::TryInto};
 
 use crate::compile::{compile, U8_COUNT};
 use crate::debug::disassemble_instruction;
-use crate::memory::free_object;
+use crate::memory::free_objectes;
 use crate::table::Table;
 use crate::value::object::ObjClosure;
 use crate::value::object::{take_string, NativeFn, ObjNative, ObjType, ObjUpValue};
@@ -41,21 +41,28 @@ const FRAMES_MAX: usize = 64;
 const STACK_MAX: usize = FRAMES_MAX * U8_COUNT;
 #[derive(Debug)]
 pub struct Vm {
-    frames: [CallFrame; FRAMES_MAX],
-    frame_count: usize,
+    pub frames: [CallFrame; FRAMES_MAX],
+    pub frame_count: usize,
 
-    stack: [Value; STACK_MAX],
-    stack_top: *mut Value,
+    pub stack: [Value; STACK_MAX],
+    pub stack_top: *mut Value,
+
+    pub bytes_allocated: usize,
+    pub next_gc: usize,
+
     pub objects: *mut Obj,
     pub strings: Table,
     pub open_upvalues: *mut ObjUpValue,
     pub globals: Table,
+    pub gray_count: usize,
+    pub gray_capacity: usize,
+    pub gray_stack: *mut *mut Obj,
 }
 pub static mut VM: Vm = Vm::new();
 
 #[derive(Debug, Clone, Copy)]
-struct CallFrame {
-    closure: *mut ObjClosure,
+pub struct CallFrame {
+    pub closure: *mut ObjClosure,
     ip: *mut u8,
     slots: *mut Value,
 }
@@ -80,6 +87,11 @@ impl Vm {
             strings: Table::new(),
             globals: Table::new(),
             open_upvalues: ptr::null_mut(),
+            gray_count: 0,
+            gray_capacity: 0,
+            gray_stack: ptr::null_mut(),
+            bytes_allocated: 0,
+            next_gc: 1024 * 1024,
         }
     }
     pub fn init(&mut self) {
@@ -317,7 +329,7 @@ impl Vm {
             }
         }
     }
-    fn pop(&mut self) -> Value {
+    pub fn pop(&mut self) -> Value {
         unsafe {
             self.stack_top = self.stack_top.sub(1);
             *self.stack_top
@@ -327,7 +339,7 @@ impl Vm {
         *self.stack_top.offset(-1 - distance)
     }
 
-    fn push(&mut self, value: Value) {
+    pub fn push(&mut self, value: Value) {
         unsafe {
             *self.stack_top = value;
             self.stack_top = self.stack_top.add(1);
@@ -346,12 +358,12 @@ impl Vm {
     pub unsafe fn free(&mut self) {
         self.globals.free_table();
         self.strings.free_table();
-        self.free_objectes();
+        free_objectes();
     }
 
     unsafe fn concatenate(&mut self) {
-        let b = *AS_STRING!(self.pop());
-        let a = *AS_STRING!(self.pop());
+        let b = *AS_STRING!(self.peek(0));
+        let a = *AS_STRING!(self.peek(1));
 
         let len = a.len + b.len;
         let chars = std::alloc::realloc(ptr::null_mut(), Layout::new::<u8>(), len);
@@ -359,17 +371,11 @@ impl Vm {
         ptr::copy_nonoverlapping(b.chars, chars.add(a.len) as _, b.len);
 
         let result = take_string(chars, len);
+        self.pop();
+        self.pop();
         self.push(OBJ_VAL!(result));
     }
 
-    unsafe fn free_objectes(&mut self) {
-        let mut object = self.objects;
-        while !object.is_null() {
-            let next = (*object).next;
-            free_object(object);
-            object = next;
-        }
-    }
     unsafe fn call(&mut self, closure: *mut ObjClosure, arg_count: isize) -> Result<(), ()> {
         if arg_count != (*(*closure).function).arity.try_into().unwrap() {
             runtime_error!(

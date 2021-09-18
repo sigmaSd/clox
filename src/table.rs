@@ -1,7 +1,7 @@
 use std::ptr;
 
 use crate::{
-    memory::{allocate, free_array, grow_capacity},
+    memory::{allocate, free_array, grow_capacity, mark_object, mark_value},
     utils::Helper,
     value::{object::ObjString, Value},
     BOOL_VAL, NIL_VAL,
@@ -172,9 +172,26 @@ impl Table {
             index = (index + 1) % self.capacity;
         }
     }
+
+    pub(crate) unsafe fn remove_white(&mut self) {
+        for i in 0..self.capacity {
+            let entry = &*self.entries.add(i);
+            if !entry.key.is_null() && !(*(*entry).key).obj.is_marked {
+                self.table_delete(entry.key);
+            }
+        }
+    }
 }
 
 struct Entry {
     key: *const ObjString,
     value: Value,
+}
+
+pub unsafe fn mark_table(table: &crate::table::Table) {
+    for i in 0..table.capacity {
+        let entry = &mut *table.entries.add(i);
+        mark_object(entry.key as _);
+        mark_value(&mut entry.value);
+    }
 }

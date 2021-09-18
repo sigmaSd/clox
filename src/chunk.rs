@@ -1,6 +1,7 @@
 use crate::{
     memory::{free_array, grow_array, grow_capacity},
     value::Value,
+    vm::VM,
 };
 use std::{convert::TryFrom, ptr};
 
@@ -51,13 +52,13 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    pub fn new() -> Self {
+    pub fn _new() -> Self {
         Self {
             count: 0,
             capacity: 0,
             lines: ptr::null_mut(),
             code: ptr::null_mut(),
-            constants: ValueArray::new(),
+            constants: ValueArray::_new(),
         }
     }
     pub fn init(&mut self) {
@@ -85,7 +86,11 @@ impl Chunk {
         self.init();
     }
     pub fn add_constant(&mut self, value: Value) -> usize {
-        self.constants.write(value);
-        self.constants.count - 1
+        unsafe {
+            VM.push(value);
+            self.constants.write(value);
+            VM.pop();
+            self.constants.count - 1
+        }
     }
 }

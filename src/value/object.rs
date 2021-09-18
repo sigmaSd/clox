@@ -5,7 +5,7 @@ use crate::{
     memory::{allocate, free_array},
     utils::Helper,
     vm::VM,
-    NIL_VAL,
+    NIL_VAL, OBJ_VAL,
 };
 
 use super::Value;
@@ -134,6 +134,7 @@ impl ObjFunction {
 pub struct Obj {
     pub otype: ObjType,
     pub next: *mut Obj,
+    pub is_marked: bool,
 }
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum ObjType {
@@ -205,7 +206,9 @@ fn allocate_string(chars: *mut u8, len: usize, hash: u32) -> *const ObjString {
         (*string).len = len;
         (*string).hash = hash;
 
+        VM.push(OBJ_VAL!(string));
         VM.strings.table_set(string, NIL_VAL!());
+        VM.pop();
 
         string
     }
@@ -216,8 +219,18 @@ pub unsafe fn allocate_object<T>(otype: ObjType) -> *mut T {
         std::alloc::realloc(ptr::null_mut(), Layout::new::<T>(), mem::size_of::<T>()) as _;
 
     (*object).otype = otype;
+    (*object).is_marked = false;
     (*object).next = VM.objects;
     VM.objects = object;
+
+    if cfg!(feature = "DEBUG_LOG_GC") {
+        println!(
+            "{:p} allocate {}bytes for {:?}",
+            object,
+            mem::size_of::<T>(),
+            otype
+        );
+    }
 
     (*object).otype = otype;
     object as _
