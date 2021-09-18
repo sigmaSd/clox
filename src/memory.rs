@@ -8,7 +8,10 @@ use crate::{
     compile::mark_compiler_roots,
     table::mark_table,
     value::{
-        object::{ObjClosure, ObjFunction, ObjNative, ObjString, ObjType, ObjUpValue},
+        object::{
+            ObjClass, ObjClosure, ObjFunction, ObjInstance, ObjNative, ObjString, ObjType,
+            ObjUpValue,
+        },
         print_value, Obj, Value,
     },
     vm::VM,
@@ -52,6 +55,14 @@ pub unsafe fn free_object(obj: *const Obj) {
         ObjType::UpValue => {
             free::<ObjUpValue>(obj as _);
         }
+        ObjType::Class => {
+            free::<ObjClass>(obj as _);
+        }
+        ObjType::Instance => {
+            let instance: *mut ObjInstance = obj as _;
+            (*instance).fields.free_table();
+            free::<ObjInstance>(obj as _);
+        }
     }
 }
 
@@ -88,7 +99,7 @@ fn reallocate<T>(ptr: *mut T, old_size: usize, new_size: usize) -> *mut u8 {
         if diff > 0 {
             VM.bytes_allocated += diff as usize;
         } else {
-            VM.bytes_allocated -= diff.abs() as usize;
+            VM.bytes_allocated = VM.bytes_allocated.saturating_sub(diff.abs() as usize);
         }
 
         if new_size > old_size {
@@ -188,6 +199,15 @@ unsafe fn blacken_object(object: *mut Obj) {
             for i in 0..(*closure).upvalue_count {
                 mark_object((*(*closure).upvalues.add(i)) as _);
             }
+        }
+        ObjType::Class => {
+            let klass: *mut ObjClass = object as _;
+            mark_object((*klass).name as _);
+        }
+        ObjType::Instance => {
+            let instance: *mut ObjInstance = object as _;
+            mark_object((*instance).klass as _);
+            mark_table(&(*instance).fields);
         }
     }
 }

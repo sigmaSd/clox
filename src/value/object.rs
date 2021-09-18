@@ -3,6 +3,7 @@ use std::{alloc::Layout, fmt::Display, mem, ptr};
 use crate::{
     chunk::Chunk,
     memory::{allocate, free_array},
+    table::Table,
     utils::Helper,
     vm::VM,
     NIL_VAL, OBJ_VAL,
@@ -26,6 +27,50 @@ pub fn print_object(value: Value) {
         }
         ObjType::UpValue => {
             print!("upvalue");
+        }
+        ObjType::Class => {
+            print!("{}", unsafe { (*(*crate::AS_CLASS!(value)).name).as_str() })
+        }
+        ObjType::Instance => {
+            print!("{} instance", unsafe {
+                (*(*(*crate::AS_INSTANCE!(value)).klass).name).as_str()
+            })
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ObjInstance {
+    obj: Obj,
+    pub klass: *const ObjClass,
+    pub fields: Table,
+}
+
+impl ObjInstance {
+    pub fn new(klass: *const ObjClass) -> *mut Self {
+        unsafe {
+            let instance: *mut ObjInstance = allocate_object(ObjType::Instance);
+            (*instance).klass = klass;
+            (*instance).fields.init();
+            instance
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ObjClass {
+    obj: Obj,
+    pub name: *const ObjString,
+}
+
+impl ObjClass {
+    pub fn new(name: *const ObjString) -> *mut Self {
+        unsafe {
+            let klass: *mut ObjClass = allocate_object(ObjType::Class);
+            (*klass).name = name;
+            klass
         }
     }
 }
@@ -122,7 +167,7 @@ impl ObjFunction {
             (*function).arity = 0;
             (*function).upvalue_count = 0;
             (*function).name = ptr::null_mut();
-            (*function).chunk.init();
+            (*function).chunk = Chunk::new();
 
             function
         }
@@ -143,6 +188,8 @@ pub enum ObjType {
     String,
     Closure,
     UpValue,
+    Class,
+    Instance,
 }
 impl Obj {
     pub fn is_obj_type(&self, otype: ObjType) -> bool {
@@ -280,6 +327,20 @@ macro_rules! AS_NATIVE {
 macro_rules! AS_CLOSURE {
     ($value: expr) => {{
         crate::AS_OBJ!($value) as *mut crate::value::object::ObjClosure
+    }};
+}
+
+#[macro_export]
+macro_rules! AS_CLASS {
+    ($value: expr) => {{
+        crate::AS_OBJ!($value) as *mut crate::value::object::ObjClass
+    }};
+}
+
+#[macro_export]
+macro_rules! AS_INSTANCE {
+    ($value: expr) => {{
+        crate::AS_OBJ!($value) as *mut crate::value::object::ObjInstance
     }};
 }
 

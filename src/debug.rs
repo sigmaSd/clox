@@ -55,12 +55,10 @@ pub unsafe fn disassemble_instruction(chunk: *const Chunk, mut offset: isize) ->
             OpCode::Loop => jump_instruction("OpLoop", -1, chunk, offset),
             OpCode::Call => byte_instruction("OpCall", chunk, offset),
             OpCode::Closure => {
-                dbg!(offset);
                 offset += 1;
                 let constant = *(*chunk).code.offset(offset);
                 offset += 1;
                 print!("OpClosure {} ", constant);
-                //dbg!(*(*chunk).constants.values.add(9));
                 print_value(*(*chunk).constants.values.add(constant as _));
                 println!();
 
@@ -77,12 +75,14 @@ pub unsafe fn disassemble_instruction(chunk: *const Chunk, mut offset: isize) ->
                         index
                     );
                 }
-
-                dbg!(offset)
+                offset
             }
             OpCode::GetUpValue => byte_instruction("OpGetUpValue", chunk, offset),
             OpCode::SetUpValue => byte_instruction("OpSetUpValue", chunk, offset),
             OpCode::CloseUpValue => simple_instruction("OpCloseUpValue", offset),
+            OpCode::Class => constant_instuction("OpClass", &*chunk, offset),
+            OpCode::GetProperty => constant_instuction("OpGetProperty", &*chunk, offset),
+            OpCode::SetProperty => constant_instuction("OpSetProperty", &*chunk, offset),
         },
         Err(e) => {
             println!("{}", e);

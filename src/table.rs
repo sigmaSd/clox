@@ -9,7 +9,7 @@ use crate::{
 
 const TABLE_MAX_LOAD: f32 = 0.75;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Table {
     count: usize,
     capacity: usize,

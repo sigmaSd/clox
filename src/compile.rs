@@ -40,7 +40,9 @@ pub unsafe fn mark_compiler_roots() {
 }
 
 unsafe fn declaration() {
-    if tmatch(TokenType::FUN) {
+    if tmatch(TokenType::CLASS) {
+        class_declaration();
+    } else if tmatch(TokenType::FUN) {
         fun_declaration();
     } else if tmatch(TokenType::VAR) {
         var_declaration();
@@ -51,6 +53,18 @@ unsafe fn declaration() {
     if parser.panic_mode {
         synchronize();
     }
+}
+
+unsafe fn class_declaration() {
+    consume(TokenType::IDENTIFIER, "Expect class name.");
+    let name_constant = identifier_constant(&parser.previous);
+    declare_variable();
+
+    emit_bytes(OpCode::Class.into(), name_constant);
+    define_variable(name_constant);
+
+    consume(TokenType::LEFT_BRACE, "Expect '{' before class body.");
+    consume(TokenType::RIGHT_BRACE, "Expect '}' after class body.");
 }
 
 unsafe fn fun_declaration() {
@@ -196,7 +210,8 @@ unsafe fn add_local(name: Token) {
 }
 
 unsafe fn identifier_constant(name: &Token) -> u8 {
-    make_constant(OBJ_VAL!(copy_string(name.start, name.length)))
+    let s = copy_string(name.start, name.length);
+    make_constant(OBJ_VAL!(s))
 }
 
 unsafe fn synchronize() {
@@ -462,6 +477,18 @@ unsafe fn binary(_can_assign: bool) {
 unsafe fn call(_can_assign: bool) {
     let arg_count = argument_list();
     emit_bytes(OpCode::Call.into(), arg_count);
+}
+
+unsafe fn dot(can_assign: bool) {
+    consume(TokenType::IDENTIFIER, "Expect property name after '.'.");
+    let name = identifier_constant(&parser.previous);
+
+    if can_assign && tmatch(TokenType::EQUAL) {
+        expression();
+        emit_bytes(OpCode::SetProperty.into(), name);
+    } else {
+        emit_bytes(OpCode::GetProperty.into(), name);
+    }
 }
 
 unsafe fn argument_list() -> u8 {
@@ -930,8 +957,8 @@ const RULES: Map<40> = Map([
         DOT,
         ParseRule {
             prefix: None,
-            infix: None,
-            presendence: Presendence::NONE,
+            infix: Some(dot),
+            presendence: Presendence::CALL,
         },
     ),
     (

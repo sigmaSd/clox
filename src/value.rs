@@ -52,6 +52,12 @@ impl Value {
     pub fn is_closure(&self) -> bool {
         unsafe { self.is_obj() && (**crate::AS_OBJ!(self)).is_obj_type(ObjType::Closure) }
     }
+    pub fn is_class(&self) -> bool {
+        unsafe { self.is_obj() && (**crate::AS_OBJ!(self)).is_obj_type(ObjType::Class) }
+    }
+    pub fn is_instance(&self) -> bool {
+        unsafe { self.is_obj() && (**crate::AS_OBJ!(self)).is_obj_type(ObjType::Instance) }
+    }
 }
 
 #[macro_export]
@@ -124,7 +130,7 @@ pub struct ValueArray {
 }
 
 impl ValueArray {
-    pub fn _new() -> Self {
+    pub fn new() -> Self {
         Self {
             count: 0,
             capacity: 0,

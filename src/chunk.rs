@@ -34,7 +34,7 @@ macro_rules! gen_opcode {
     }
 )}
 
-gen_opcode!(Loop Call Closure CloseUpValue Return Constant Nil True False Pop Equal Greater Less Add Substract Multiply Divide Not Negate Print Jump JumpIfFalse DefineGlobal GetLocal SetLocal GetGlobal SetGlobal GetUpValue SetUpValue);
+gen_opcode!(Loop Call Closure CloseUpValue Return Class Constant Nil True False Pop Equal Greater Less Add Substract Multiply Divide Not Negate Print Jump JumpIfFalse DefineGlobal GetLocal SetLocal GetGlobal SetGlobal GetUpValue SetUpValue GetProperty SetProperty);
 
 impl From<OpCode> for u8 {
     fn from(code: OpCode) -> Self {
@@ -52,19 +52,20 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    pub fn _new() -> Self {
+    pub fn new() -> Self {
         Self {
             count: 0,
             capacity: 0,
             lines: ptr::null_mut(),
             code: ptr::null_mut(),
-            constants: ValueArray::_new(),
+            constants: ValueArray::new(),
         }
     }
     pub fn init(&mut self) {
         self.count = 0;
         self.capacity = 0;
         self.code = ptr::null_mut();
+        self.constants = ValueArray::new();
     }
     pub fn write(&mut self, byte: u8, line: usize) {
         unsafe {

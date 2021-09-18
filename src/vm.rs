@@ -5,15 +5,15 @@ use crate::compile::{compile, U8_COUNT};
 use crate::debug::disassemble_instruction;
 use crate::memory::free_objectes;
 use crate::table::Table;
-use crate::value::object::ObjClosure;
-use crate::value::object::{take_string, NativeFn, ObjNative, ObjType, ObjUpValue};
+use crate::value::object::{take_string, NativeFn, ObjInstance, ObjNative, ObjType, ObjUpValue};
+use crate::value::object::{ObjClass, ObjClosure};
 use crate::value::{copy_string, Obj};
 use crate::{
     chunk::OpCode,
     value::{print_value, Value},
     AS_BOOL, AS_NUMBER, AS_STRING, BOOL_VAL, NIL_VAL, NUMBER_VAL,
 };
-use crate::{AS_CLOSURE, AS_FUNCTION, AS_NATIVE, OBJ_TYPE, OBJ_VAL};
+use crate::{AS_CLASS, AS_CLOSURE, AS_FUNCTION, AS_INSTANCE, AS_NATIVE, OBJ_TYPE, OBJ_VAL};
 
 macro_rules! runtime_error {
        ($($arg:tt)*) => ({
@@ -189,7 +189,8 @@ impl Vm {
                 OpCode::Return => {
                     let result = self.pop();
                     self.close_upvalues((*frame).slots);
-                    self.frame_count -= 1;
+                    //FIXME
+                    self.frame_count = self.frame_count.saturating_sub(1);
                     if self.frame_count == 0 {
                         self.pop();
                         return Ok(());
@@ -326,6 +327,37 @@ impl Vm {
                     self.close_upvalues(self.stack_top.offset(-1));
                     self.pop();
                 }
+                OpCode::Class => {
+                    self.push(OBJ_VAL!(ObjClass::new(READ_STRING!())));
+                }
+                OpCode::GetProperty => {
+                    if !self.peek(0).is_instance() {
+                        runtime_error!("Only instances have properties.");
+                        return Err(InterpretError::RuntimError);
+                    }
+
+                    let instance = AS_INSTANCE!(self.peek(0));
+                    let name = READ_STRING!();
+
+                    if let Some(value) = (*instance).fields.table_get(name) {
+                        self.pop();
+                        self.push(value);
+                        continue;
+                    }
+                    runtime_error!("Undefined property '{}'.", (*name).as_str());
+                    return Err(InterpretError::RuntimError);
+                }
+                OpCode::SetProperty => {
+                    if !self.peek(1).is_instance() {
+                        runtime_error!("Only instances have fields.");
+                        return Err(InterpretError::RuntimError);
+                    }
+                    let instance = AS_INSTANCE!(self.peek(1));
+                    (*instance).fields.table_set(READ_STRING!(), self.peek(0));
+                    let value = self.pop();
+                    self.pop();
+                    self.push(value);
+                }
             }
         }
     }
@@ -447,6 +479,13 @@ fn call_value(callee: Value, arg_count: isize) -> Result<(), ()> {
                 VM.push(result);
                 return Ok(());
             },
+            ObjType::Class => {
+                let klass = AS_CLASS!(callee);
+                unsafe {
+                    *VM.stack_top.offset(-arg_count - 1) = OBJ_VAL!(ObjInstance::new(klass));
+                }
+                return Ok(());
+            }
             _ => (),
         }
     }
