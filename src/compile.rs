@@ -5,7 +5,7 @@ use crate::{
     debug::disassemble_chunk,
     memory::mark_object,
     scanner::{self, Token, TokenType},
-    utils::Helper,
+    utils::{Helper, PointerDeref},
     value::{copy_string, object::ObjFunction, Obj, Value},
     NUMBER_VAL, OBJ_VAL,
 };
@@ -58,13 +58,38 @@ unsafe fn declaration() {
 unsafe fn class_declaration() {
     consume(TokenType::IDENTIFIER, "Expect class name.");
     let name_constant = identifier_constant(&parser.previous);
+    let class_name = parser.previous;
     declare_variable();
 
     emit_bytes(OpCode::Class.into(), name_constant);
     define_variable(name_constant);
 
+    let mut class_compiler = ClassCompiler::new();
+    class_compiler.enclosing = current_class;
+    current_class = &mut class_compiler;
+
+    named_variable(class_name, false);
     consume(TokenType::LEFT_BRACE, "Expect '{' before class body.");
+    while !check(TokenType::RIGHT_BRACE) && !check(TokenType::EOF) {
+        method();
+    }
     consume(TokenType::RIGHT_BRACE, "Expect '}' after class body.");
+    emit_byte(OpCode::Pop.into());
+
+    current_class = current_class.deref_mut().enclosing;
+}
+
+unsafe fn method() {
+    consume(TokenType::IDENTIFIER, "Expect method name.");
+    let constant = identifier_constant(&parser.previous);
+
+    let ftype = if parser.previous.start.to_str(parser.previous.length) == "init" {
+        FunctionType::Initializer
+    } else {
+        FunctionType::Method
+    };
+    function(ftype);
+    emit_bytes(OpCode::Method.into(), constant);
 }
 
 unsafe fn fun_declaration() {
@@ -263,6 +288,9 @@ unsafe fn return_statement() {
     if tmatch(TokenType::SEMICOLON) {
         emit_return();
     } else {
+        if current.deref().ftype == FunctionType::Initializer {
+            error("Can't return a value from an initializer.");
+        }
         expression();
         consume(TokenType::SEMICOLON, "Expect ';' after return value.");
         emit_byte(OpCode::Return.into());
@@ -486,6 +514,10 @@ unsafe fn dot(can_assign: bool) {
     if can_assign && tmatch(TokenType::EQUAL) {
         expression();
         emit_bytes(OpCode::SetProperty.into(), name);
+    } else if tmatch(TokenType::LEFT_PAREN) {
+        let arg_count = argument_list();
+        emit_bytes(OpCode::Invoke.into(), name);
+        emit_byte(arg_count);
     } else {
         emit_bytes(OpCode::GetProperty.into(), name);
     }
@@ -651,6 +683,8 @@ impl Compiler {
 enum FunctionType {
     Function,
     Script,
+    Method,
+    Initializer,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -672,6 +706,21 @@ impl Local {
 
 #[allow(non_upper_case_globals)]
 static mut current: *mut Compiler = ptr::null_mut();
+
+#[allow(non_upper_case_globals)]
+static mut current_class: *mut ClassCompiler = ptr::null_mut();
+
+struct ClassCompiler {
+    enclosing: *mut ClassCompiler,
+}
+
+impl ClassCompiler {
+    fn new() -> Self {
+        Self {
+            enclosing: ptr::null_mut(),
+        }
+    }
+}
 //Compiler {
 //    enclosing: ptr::null_mut(),
 //    function: ptr::null_mut(),
@@ -705,8 +754,14 @@ unsafe fn init_compiler(compiler: *mut Compiler, ftype: FunctionType) {
     (*current).local_count += 1;
     local.depth = Some(0);
     local.is_captured = false;
-    local.name.start = "" as *const str as _;
-    local.name.length = 0
+
+    if ftype != FunctionType::Function {
+        local.name.start = "this" as *const str as _;
+        local.name.length = 4;
+    } else {
+        local.name.start = "" as *const str as _;
+        local.name.length = 0
+    }
 }
 
 unsafe fn consume(ttype: TokenType, message: &str) {
@@ -735,6 +790,14 @@ unsafe fn string(_can_assign: bool) {
 
 unsafe fn variable(can_assign: bool) {
     named_variable(parser.previous, can_assign);
+}
+
+unsafe fn this(_can_assign: bool) {
+    if current_class.is_null() {
+        error("Can't use 'this' outside of a class.");
+        return;
+    }
+    variable(false);
 }
 
 unsafe fn named_variable(name: Token, can_assign: bool) {
@@ -839,7 +902,11 @@ unsafe fn error(message: &str) {
 }
 
 unsafe fn emit_return() {
-    emit_byte(OpCode::Nil.into());
+    if current.deref().ftype == FunctionType::Initializer {
+        emit_bytes(OpCode::GetLocal.into(), 0);
+    } else {
+        emit_byte(OpCode::Nil.into());
+    }
     emit_byte(OpCode::Return.into())
 }
 
@@ -1188,7 +1255,7 @@ const RULES: Map<40> = Map([
     (
         THIS,
         ParseRule {
-            prefix: None,
+            prefix: Some(this),
             infix: None,
             presendence: Presendence::NONE,
         },

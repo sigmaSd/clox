@@ -5,7 +5,10 @@ use crate::compile::{compile, U8_COUNT};
 use crate::debug::disassemble_instruction;
 use crate::memory::free_objectes;
 use crate::table::Table;
-use crate::value::object::{take_string, NativeFn, ObjInstance, ObjNative, ObjType, ObjUpValue};
+use crate::utils::PointerDeref;
+use crate::value::object::{
+    take_string, NativeFn, ObjBoundMethod, ObjInstance, ObjNative, ObjString, ObjType, ObjUpValue,
+};
 use crate::value::object::{ObjClass, ObjClosure};
 use crate::value::{copy_string, Obj};
 use crate::{
@@ -13,7 +16,9 @@ use crate::{
     value::{print_value, Value},
     AS_BOOL, AS_NUMBER, AS_STRING, BOOL_VAL, NIL_VAL, NUMBER_VAL,
 };
-use crate::{AS_CLASS, AS_CLOSURE, AS_FUNCTION, AS_INSTANCE, AS_NATIVE, OBJ_TYPE, OBJ_VAL};
+use crate::{
+    AS_BOUND_METHOD, AS_CLASS, AS_CLOSURE, AS_FUNCTION, AS_INSTANCE, AS_NATIVE, OBJ_TYPE, OBJ_VAL,
+};
 
 macro_rules! runtime_error {
        ($($arg:tt)*) => ({
@@ -57,6 +62,7 @@ pub struct Vm {
     pub gray_count: usize,
     pub gray_capacity: usize,
     pub gray_stack: *mut *mut Obj,
+    pub init_string: *mut ObjString,
 }
 pub static mut VM: Vm = Vm::new();
 
@@ -92,11 +98,14 @@ impl Vm {
             gray_stack: ptr::null_mut(),
             bytes_allocated: 0,
             next_gc: 1024 * 1024,
+            init_string: ptr::null_mut(),
         }
     }
     pub fn init(&mut self) {
         self.reset_stack();
         self.define_native("clock", clock_native);
+        self.init_string = ptr::null_mut();
+        self.init_string = copy_string("init" as *const str as _, 4) as _;
     }
     pub fn reset_stack(&mut self) {
         self.stack_top = &mut self.stack as *mut _;
@@ -344,8 +353,11 @@ impl Vm {
                         self.push(value);
                         continue;
                     }
-                    runtime_error!("Undefined property '{}'.", (*name).as_str());
-                    return Err(InterpretError::RuntimError);
+
+                    if self.bind_method(instance.deref().klass, name).is_err() {
+                        runtime_error!("Undefined property '{}'.", name.deref().as_str());
+                        return Err(InterpretError::RuntimError);
+                    }
                 }
                 OpCode::SetProperty => {
                     if !self.peek(1).is_instance() {
@@ -358,6 +370,17 @@ impl Vm {
                     self.pop();
                     self.push(value);
                 }
+                OpCode::Method => {
+                    self.define_method(READ_STRING!());
+                }
+                OpCode::Invoke => {
+                    let method = READ_STRING!();
+                    let arg_count = READ_BYTE!();
+                    if self.invoke(method, arg_count).is_err() {
+                        return Err(InterpretError::RuntimError);
+                    }
+                    frame = &mut self.frames[self.frame_count - 1];
+                }
             }
         }
     }
@@ -367,8 +390,8 @@ impl Vm {
             *self.stack_top
         }
     }
-    unsafe fn peek(&self, distance: isize) -> Value {
-        *self.stack_top.offset(-1 - distance)
+    fn peek(&self, distance: isize) -> Value {
+        unsafe { *self.stack_top.offset(-1 - distance) }
     }
 
     pub fn push(&mut self, value: Value) {
@@ -378,18 +401,17 @@ impl Vm {
         }
     }
     fn define_native(&mut self, name: &str, function: NativeFn) {
-        unsafe {
-            self.push(OBJ_VAL!(copy_string(name as *const str as _, name.len())));
-            self.push(OBJ_VAL!(ObjNative::new(function)));
-            self.globals
-                .table_set(AS_STRING!(self.stack[0]), self.stack[1]);
-            self.pop();
-            self.pop();
-        }
+        self.push(OBJ_VAL!(copy_string(name as *const str as _, name.len())));
+        self.push(OBJ_VAL!(ObjNative::new(function)));
+        self.globals
+            .table_set(AS_STRING!(self.stack[0]), self.stack[1]);
+        self.pop();
+        self.pop();
     }
     pub unsafe fn free(&mut self) {
         self.globals.free_table();
         self.strings.free_table();
+        self.init_string = ptr::null_mut();
         free_objectes();
     }
 
@@ -441,6 +463,58 @@ impl Vm {
             }
         }
     }
+
+    pub(crate) fn define_method(&mut self, name: *const crate::value::object::ObjString) {
+        let method = self.peek(0);
+        let class = AS_CLASS!(self.peek(1));
+        class.deref_mut().methods.table_set(name, method);
+        self.pop();
+    }
+
+    pub(crate) fn bind_method(
+        &mut self,
+        klass: *const ObjClass,
+        name: *const crate::value::object::ObjString,
+    ) -> Result<(), InterpretError> {
+        if let Some(method) = klass.deref().methods.table_get(name) {
+            let bound = ObjBoundMethod::new(self.peek(0), AS_CLOSURE!(method));
+            self.pop();
+            self.push(OBJ_VAL!(bound));
+            Ok(())
+        } else {
+            Err(InterpretError::RuntimError)
+        }
+    }
+
+    unsafe fn invoke(&mut self, name: *const ObjString, arg_count: u8) -> Result<(), ()> {
+        let receiver = self.peek(arg_count as _);
+
+        if !receiver.is_instance() {
+            runtime_error!("Only instances have methods.");
+            return Err(());
+        }
+        let instance = AS_INSTANCE!(receiver);
+
+        if let Some(value) = instance.deref().fields.table_get(name) {
+            *self.stack_top.offset(-(arg_count as isize) - 1) = value;
+            return call_value(value, arg_count as _);
+        }
+
+        self.invoke_from_class(instance.deref().klass, name, arg_count)
+    }
+
+    unsafe fn invoke_from_class(
+        &mut self,
+        klass: *const ObjClass,
+        name: *const ObjString,
+        arg_count: u8,
+    ) -> Result<(), ()> {
+        if let Some(method) = klass.deref().methods.table_get(name) {
+            return self.call(AS_CLOSURE!(method), arg_count as _);
+        }
+        runtime_error!("Undefined property '{}'.", name.deref().as_str());
+        Err(())
+    }
 }
 
 unsafe fn capture_upvalue(local: *mut Value) -> *mut crate::value::object::ObjUpValue {
@@ -465,12 +539,12 @@ unsafe fn capture_upvalue(local: *mut Value) -> *mut crate::value::object::ObjUp
     created_upvalue
 }
 
-fn call_value(callee: Value, arg_count: isize) -> Result<(), ()> {
+unsafe fn call_value(callee: Value, arg_count: isize) -> Result<(), ()> {
     if callee.is_obj() {
         match OBJ_TYPE!(callee) {
-            ObjType::Closure => return unsafe { VM.call(AS_CLOSURE!(callee), arg_count) },
+            ObjType::Closure => return VM.call(AS_CLOSURE!(callee), arg_count),
 
-            ObjType::Native => unsafe {
+            ObjType::Native => {
                 let native = AS_NATIVE!(callee);
                 let result = native(
                     arg_count.try_into().unwrap(),
@@ -478,13 +552,22 @@ fn call_value(callee: Value, arg_count: isize) -> Result<(), ()> {
                 );
                 VM.push(result);
                 return Ok(());
-            },
+            }
             ObjType::Class => {
                 let klass = AS_CLASS!(callee);
-                unsafe {
-                    *VM.stack_top.offset(-arg_count - 1) = OBJ_VAL!(ObjInstance::new(klass));
+                *VM.stack_top.offset(-arg_count - 1) = OBJ_VAL!(ObjInstance::new(klass));
+                if let Some(initalizer) = klass.deref().methods.table_get(VM.init_string) {
+                    return VM.call(AS_CLOSURE!(initalizer), arg_count);
+                } else if arg_count != 0 {
+                    runtime_error!("Expected 0 arguments but got {}.", arg_count);
+                    return Err(());
                 }
                 return Ok(());
+            }
+            ObjType::BoundMethod => {
+                let bound: *mut ObjBoundMethod = AS_BOUND_METHOD!(callee);
+                *VM.stack_top.offset(-arg_count - 1) = bound.deref().receiver;
+                return VM.call(bound.deref().method, arg_count);
             }
             _ => (),
         }

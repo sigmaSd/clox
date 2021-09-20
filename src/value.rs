@@ -58,6 +58,9 @@ impl Value {
     pub fn is_instance(&self) -> bool {
         unsafe { self.is_obj() && (**crate::AS_OBJ!(self)).is_obj_type(ObjType::Instance) }
     }
+    pub fn is_bound_method(&self) -> bool {
+        unsafe { self.is_obj() && (**crate::AS_OBJ!(self)).is_obj_type(ObjType::BoundMethod) }
+    }
 }
 
 #[macro_export]

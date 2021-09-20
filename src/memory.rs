@@ -7,10 +7,11 @@ use std::{
 use crate::{
     compile::mark_compiler_roots,
     table::mark_table,
+    utils::PointerDeref,
     value::{
         object::{
-            ObjClass, ObjClosure, ObjFunction, ObjInstance, ObjNative, ObjString, ObjType,
-            ObjUpValue,
+            ObjBoundMethod, ObjClass, ObjClosure, ObjFunction, ObjInstance, ObjNative, ObjString,
+            ObjType, ObjUpValue,
         },
         print_value, Obj, Value,
     },
@@ -56,12 +57,19 @@ pub unsafe fn free_object(obj: *const Obj) {
             free::<ObjUpValue>(obj as _);
         }
         ObjType::Class => {
+            let class: *mut ObjClass = obj as _;
+            class.deref_mut().methods.free_table();
             free::<ObjClass>(obj as _);
         }
         ObjType::Instance => {
             let instance: *mut ObjInstance = obj as _;
             (*instance).fields.free_table();
             free::<ObjInstance>(obj as _);
+        }
+        ObjType::BoundMethod => {
+            let bound: *mut ObjBoundMethod = obj as _;
+            mark_value(&mut bound.deref_mut().receiver);
+            mark_object(bound.deref().method as _);
         }
     }
 }
@@ -209,6 +217,11 @@ unsafe fn blacken_object(object: *mut Obj) {
             mark_object((*instance).klass as _);
             mark_table(&(*instance).fields);
         }
+        ObjType::BoundMethod => {
+            let bound: *mut ObjBoundMethod = object as _;
+            mark_value(&mut bound.deref_mut().receiver);
+            mark_object(bound.deref().method as _);
+        }
     }
 }
 
@@ -247,6 +260,7 @@ unsafe fn mark_roots() {
 
     mark_table(&VM.globals);
     mark_compiler_roots();
+    mark_object(VM.init_string as _);
 }
 
 pub unsafe fn mark_value(value: *mut Value) {

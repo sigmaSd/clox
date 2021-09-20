@@ -4,7 +4,7 @@ use crate::{
     chunk::Chunk,
     memory::{allocate, free_array},
     table::Table,
-    utils::Helper,
+    utils::{Helper, PointerDeref},
     vm::VM,
     NIL_VAL, OBJ_VAL,
 };
@@ -36,11 +36,53 @@ pub fn print_object(value: Value) {
                 (*(*(*crate::AS_INSTANCE!(value)).klass).name).as_str()
             })
         }
+        ObjType::BoundMethod => {
+            print!(
+                "{}",
+                crate::AS_BOUND_METHOD!(value)
+                    .deref()
+                    .method
+                    .deref()
+                    .function
+                    .deref()
+            )
+        }
     }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum ObjType {
+    Function,
+    Native,
+    String,
+    Closure,
+    UpValue,
+    Class,
+    Instance,
+    BoundMethod,
 }
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ObjBoundMethod {
+    obj: Obj,
+    pub receiver: Value,
+    pub method: *mut ObjClosure,
+}
+
+impl ObjBoundMethod {
+    pub fn new(receiver: Value, method: *mut ObjClosure) -> *mut Self {
+        unsafe {
+            let new_bound_method: *mut Self = allocate_object(ObjType::BoundMethod);
+            new_bound_method.deref_mut().receiver = receiver;
+            new_bound_method.deref_mut().method = method;
+            new_bound_method
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ObjInstance {
     obj: Obj,
     pub klass: *const ObjClass,
@@ -59,10 +101,11 @@ impl ObjInstance {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ObjClass {
     obj: Obj,
     pub name: *const ObjString,
+    pub methods: Table,
 }
 
 impl ObjClass {
@@ -70,6 +113,7 @@ impl ObjClass {
         unsafe {
             let klass: *mut ObjClass = allocate_object(ObjType::Class);
             (*klass).name = name;
+            (*klass).methods = Table::new();
             klass
         }
     }
@@ -181,16 +225,6 @@ pub struct Obj {
     pub next: *mut Obj,
     pub is_marked: bool,
 }
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum ObjType {
-    Function,
-    Native,
-    String,
-    Closure,
-    UpValue,
-    Class,
-    Instance,
-}
 impl Obj {
     pub fn is_obj_type(&self, otype: ObjType) -> bool {
         self.otype == otype
@@ -285,9 +319,12 @@ pub unsafe fn allocate_object<T>(otype: ObjType) -> *mut T {
 
 #[macro_export]
 macro_rules! OBJ_TYPE {
-    ($val: expr) => {
-        unsafe { (*crate::AS_OBJ!($val)).otype }
-    };
+    ($val: expr) => {{
+        #[allow(unused_unsafe)]
+        unsafe {
+            (*crate::AS_OBJ!($val)).otype
+        }
+    }};
 }
 
 #[macro_export]
@@ -341,6 +378,12 @@ macro_rules! AS_CLASS {
 macro_rules! AS_INSTANCE {
     ($value: expr) => {{
         crate::AS_OBJ!($value) as *mut crate::value::object::ObjInstance
+    }};
+}
+#[macro_export]
+macro_rules! AS_BOUND_METHOD {
+    ($value: expr) => {{
+        crate::AS_OBJ!($value) as *mut crate::value::object::ObjBoundMethod
     }};
 }
 

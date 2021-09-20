@@ -1,4 +1,4 @@
-use std::ptr;
+use std::{cell::Cell, ptr};
 
 use crate::{
     memory::{allocate, free_array, grow_capacity, mark_object, mark_value},
@@ -9,12 +9,12 @@ use crate::{
 
 const TABLE_MAX_LOAD: f32 = 0.75;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Table {
     count: usize,
     capacity: usize,
     entries: *mut Entry,
-    tombstone: *mut Entry,
+    tombstone: Cell<*mut Entry>,
 }
 
 impl Table {
@@ -23,20 +23,20 @@ impl Table {
             count: 0,
             capacity: 0,
             entries: ptr::null_mut(),
-            tombstone: ptr::null_mut(),
+            tombstone: Cell::new(ptr::null_mut()),
         }
     }
     pub fn init(&mut self) {
         self.count = 0;
         self.capacity = 0;
         self.entries = ptr::null_mut();
-        self.tombstone = ptr::null_mut();
+        self.tombstone = Cell::new(ptr::null_mut());
     }
     pub fn free_table(&mut self) {
         free_array::<Entry>(self.entries, self.capacity);
         self.init();
     }
-    pub fn table_get(&mut self, key: *const ObjString) -> Option<Value> {
+    pub fn table_get(&self, key: *const ObjString) -> Option<Value> {
         unsafe {
             if self.count == 0 {
                 return None;
@@ -66,22 +66,24 @@ impl Table {
         }
     }
 
-    pub unsafe fn table_set(&mut self, key: *const ObjString, value: Value) -> bool {
-        if (self.count + 1) as f32 > self.capacity as f32 * TABLE_MAX_LOAD {
-            let capacity = grow_capacity(self.capacity);
-            self.adjust_capacity(capacity);
+    pub fn table_set(&mut self, key: *const ObjString, value: Value) -> bool {
+        unsafe {
+            if (self.count + 1) as f32 > self.capacity as f32 * TABLE_MAX_LOAD {
+                let capacity = grow_capacity(self.capacity);
+                self.adjust_capacity(capacity);
+            }
+
+            let mut entry = self.find_entry(self.entries, self.capacity, key);
+            let is_new_key = (*entry).key.is_null();
+            if is_new_key && (*entry).value.is_nil() {
+                self.count += 1;
+            }
+
+            (*entry).key = key;
+            (*entry).value = value;
+
+            is_new_key
         }
-
-        let mut entry = self.find_entry(self.entries, self.capacity, key);
-        let is_new_key = (*entry).key.is_null();
-        if is_new_key && (*entry).value.is_nil() {
-            self.count += 1;
-        }
-
-        (*entry).key = key;
-        (*entry).value = value;
-
-        is_new_key
     }
 
     fn adjust_capacity(&mut self, capacity: usize) {
@@ -111,7 +113,7 @@ impl Table {
     }
 
     fn find_entry(
-        &mut self,
+        &self,
         entries: *mut Entry,
         capacity: usize,
         key: *const ObjString,
@@ -122,13 +124,13 @@ impl Table {
                 let entry = entries.add(index);
                 if (*entry).key.is_null() {
                     if (*entry).value.is_nil() {
-                        return if !self.tombstone.is_null() {
-                            self.tombstone
+                        return if !self.tombstone.get().is_null() {
+                            self.tombstone.get()
                         } else {
                             entry
                         };
-                    } else if self.tombstone.is_null() {
-                        self.tombstone = entry;
+                    } else if self.tombstone.get().is_null() {
+                        self.tombstone.set(entry);
                     }
                 } else if (*entry).key == key {
                     return entry;

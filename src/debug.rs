@@ -3,7 +3,7 @@ use crate::{
     value::print_value,
     AS_FUNCTION,
 };
-use std::convert::TryInto;
+use std::{convert::TryInto, ops::Deref};
 
 pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
     println!("== {} ==", name);
@@ -83,12 +83,23 @@ pub unsafe fn disassemble_instruction(chunk: *const Chunk, mut offset: isize) ->
             OpCode::Class => constant_instuction("OpClass", &*chunk, offset),
             OpCode::GetProperty => constant_instuction("OpGetProperty", &*chunk, offset),
             OpCode::SetProperty => constant_instuction("OpSetProperty", &*chunk, offset),
+            OpCode::Method => constant_instuction("OpMethod", &*chunk, offset),
+            OpCode::Invoke => invoke_instruction("OpInvoke", &*chunk, offset),
         },
         Err(e) => {
             println!("{}", e);
             offset + 1
         }
     }
+}
+
+unsafe fn invoke_instruction(name: &str, chunk: &Chunk, offset: isize) -> isize {
+    let constant = *chunk.deref().code.offset(offset + 1);
+    let arg_count = *chunk.deref().code.offset(offset + 2);
+    println!("{} ({} args) {} '", name, arg_count, constant);
+    print_value(*chunk.deref().constants.values.add(constant as _));
+    println!("'");
+    offset + 3
 }
 
 unsafe fn jump_instruction(name: &str, sign: isize, chunk: *const Chunk, offset: isize) -> isize {
