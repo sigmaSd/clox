@@ -68,6 +68,23 @@ unsafe fn class_declaration() {
     class_compiler.enclosing = current_class;
     current_class = &mut class_compiler;
 
+    if tmatch(TokenType::LESS) {
+        consume(TokenType::IDENTIFIER, "Expect superclass name.");
+        variable(false);
+
+        if identifiers_equal(&class_name, &parser.previous) {
+            error("A class can't inherit from itself.");
+        }
+
+        begin_scope();
+        add_local(synthetic_token("super"));
+        define_variable(0);
+
+        named_variable(class_name, false);
+        emit_byte(OpCode::Inherit.into());
+        class_compiler.has_superclass = true;
+    }
+
     named_variable(class_name, false);
     consume(TokenType::LEFT_BRACE, "Expect '{' before class body.");
     while !check(TokenType::RIGHT_BRACE) && !check(TokenType::EOF) {
@@ -76,7 +93,41 @@ unsafe fn class_declaration() {
     consume(TokenType::RIGHT_BRACE, "Expect '}' after class body.");
     emit_byte(OpCode::Pop.into());
 
+    if class_compiler.has_superclass {
+        end_scope();
+    }
+
     current_class = current_class.deref_mut().enclosing;
+}
+
+fn synthetic_token(text: &str) -> Token {
+    let mut token = Token::new_uninit();
+    token.start = text as *const str as _;
+    token.length = text.len();
+    token
+}
+
+unsafe fn super_(_can_assign: bool) {
+    if current_class.is_null() {
+        error("Can't use 'super' outside of a class.");
+    } else if !current_class.deref().has_superclass {
+        error("Can't use 'super' in a class with no superclass.");
+    }
+
+    consume(TokenType::DOT, "Expect '.' after 'super'.");
+    consume(TokenType::IDENTIFIER, "Expect superclass method name.");
+    let name = identifier_constant(&parser.previous);
+
+    named_variable(synthetic_token("this"), false);
+    if tmatch(TokenType::LEFT_PAREN) {
+        let arg_count = argument_list();
+        named_variable(synthetic_token("super"), false);
+        emit_bytes(OpCode::SuperInvoke.into(), name);
+        emit_byte(arg_count);
+    } else {
+        named_variable(synthetic_token("super"), false);
+        emit_bytes(OpCode::GetSuper.into(), name);
+    }
 }
 
 unsafe fn method() {
@@ -712,26 +763,17 @@ static mut current_class: *mut ClassCompiler = ptr::null_mut();
 
 struct ClassCompiler {
     enclosing: *mut ClassCompiler,
+    has_superclass: bool,
 }
 
 impl ClassCompiler {
     fn new() -> Self {
         Self {
             enclosing: ptr::null_mut(),
+            has_superclass: false,
         }
     }
 }
-//Compiler {
-//    enclosing: ptr::null_mut(),
-//    function: ptr::null_mut(),
-//    ftype: FunctionType::Script,
-//    locals: [Local {
-//        name: Token::new_uninit(),
-//        depth: Some(0),
-//    }; U8_COUNT],
-//    local_count: 0,
-//    scope_depth: 0,
-//};
 
 unsafe fn init_compiler(compiler: *mut Compiler, ftype: FunctionType) {
     (*compiler).enclosing = current;
@@ -1247,7 +1289,7 @@ const RULES: Map<40> = Map([
     (
         SUPER,
         ParseRule {
-            prefix: None,
+            prefix: Some(super_),
             infix: None,
             presendence: Presendence::NONE,
         },

@@ -139,10 +139,10 @@ impl Table {
             }
         }
     }
-    unsafe fn _table_add_all(&mut self, other: &mut Table) {
+    pub unsafe fn table_add_all(&self, other: &mut Table) {
         for i in 0..self.capacity {
             let entry = self.entries.add(i);
-            if (*entry).key.is_null() {
+            if !(*entry).key.is_null() {
                 other.table_set((*entry).key, (*entry).value);
             }
         }

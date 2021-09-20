@@ -85,6 +85,9 @@ pub unsafe fn disassemble_instruction(chunk: *const Chunk, mut offset: isize) ->
             OpCode::SetProperty => constant_instuction("OpSetProperty", &*chunk, offset),
             OpCode::Method => constant_instuction("OpMethod", &*chunk, offset),
             OpCode::Invoke => invoke_instruction("OpInvoke", &*chunk, offset),
+            OpCode::Inherit => simple_instruction("OpInherit", offset),
+            OpCode::GetSuper => constant_instuction("OpGetSuper", &*chunk, offset),
+            OpCode::SuperInvoke => invoke_instruction("OpSuperInvoke", &*chunk, offset),
         },
         Err(e) => {
             println!("{}", e);

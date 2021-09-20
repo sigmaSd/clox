@@ -381,6 +381,38 @@ impl Vm {
                     }
                     frame = &mut self.frames[self.frame_count - 1];
                 }
+                OpCode::Inherit => {
+                    let superclass = self.peek(1);
+                    if !superclass.is_class() {
+                        runtime_error!("Superclass must be a class.");
+                        return Err(InterpretError::RuntimError);
+                    }
+                    let subclass = AS_CLASS!(self.peek(0));
+                    AS_CLASS!(superclass)
+                        .deref()
+                        .methods
+                        .table_add_all(&mut subclass.deref_mut().methods);
+                    self.pop();
+                }
+                OpCode::GetSuper => {
+                    let name = READ_STRING!();
+                    let superclass = AS_CLASS!(self.pop());
+                    if self.bind_method(superclass, name).is_err() {
+                        return Err(InterpretError::RuntimError);
+                    }
+                }
+                OpCode::SuperInvoke => {
+                    let method = READ_STRING!();
+                    let arg_count = READ_BYTE!();
+                    let superclass = AS_CLASS!(self.pop());
+                    if self
+                        .invoke_from_class(superclass, method, arg_count)
+                        .is_err()
+                    {
+                        return Err(InterpretError::RuntimError);
+                    }
+                    frame = &mut self.frames[self.frame_count - 1];
+                }
             }
         }
     }
