@@ -94,7 +94,7 @@ impl ObjInstance {
         unsafe {
             let instance: *mut ObjInstance = allocate_object(ObjType::Instance);
             (*instance).klass = klass;
-            (*instance).fields.init();
+            (*instance).fields = Table::new();
             instance
         }
     }

@@ -103,9 +103,9 @@ impl Vm {
     }
     pub fn init(&mut self) {
         self.reset_stack();
-        self.define_native("clock", clock_native);
         self.init_string = ptr::null_mut();
         self.init_string = copy_string("init" as *const str as _, 4) as _;
+        self.define_native("clock", clock_native);
     }
     pub fn reset_stack(&mut self) {
         self.stack_top = &mut self.stack as *mut _;
@@ -194,7 +194,9 @@ impl Vm {
                 );
             }
 
-            match READ_BYTE!().try_into().unwrap() {
+            //NOTE: try_into destroys performance here
+            // So we transmute instead
+            match std::mem::transmute(READ_BYTE!()) {
                 OpCode::Return => {
                     let result = self.pop();
                     self.close_upvalues((*frame).slots);
@@ -582,6 +584,7 @@ unsafe fn call_value(callee: Value, arg_count: isize) -> Result<(), ()> {
                     arg_count.try_into().unwrap(),
                     VM.stack_top.offset(-arg_count),
                 );
+                VM.stack_top = VM.stack_top.offset(-arg_count - 1);
                 VM.push(result);
                 return Ok(());
             }

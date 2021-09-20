@@ -26,7 +26,7 @@ impl Table {
             tombstone: Cell::new(ptr::null_mut()),
         }
     }
-    pub fn init(&mut self) {
+    fn init(&mut self) {
         self.count = 0;
         self.capacity = 0;
         self.entries = ptr::null_mut();
